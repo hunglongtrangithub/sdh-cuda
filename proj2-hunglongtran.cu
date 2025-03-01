@@ -1,3 +1,4 @@
+#include <cuda_device_runtime_api.h>
 #include <cuda_runtime.h>
 #include <driver_types.h>
 #include <math.h>
@@ -37,18 +38,24 @@ typedef struct histogram {
 } histogram;
 
 typedef struct atom_list {
-  atom *arr;
+  double *x_pos;
+  double *y_pos;
+  double *z_pos;
   unsigned long long len;
 } atoms_data;
 
 /* Helper function to calculate distance between two points */
-__host__ __device__ double p2p_distance(atom a1, atom a2) {
-  double x1 = a1.x_pos;
-  double x2 = a2.x_pos;
-  double y1 = a1.y_pos;
-  double y2 = a2.y_pos;
-  double z1 = a1.z_pos;
-  double z2 = a2.z_pos;
+__host__ __device__ double p2p_distance(atoms_data *atoms, int i, int j) {
+  if (i == j)
+    return 0.0;
+  if (i >= atoms->len || j >= atoms->len)
+    return -1.0;
+  double x1 = atoms->x_pos[i];
+  double x2 = atoms->x_pos[j];
+  double y1 = atoms->y_pos[i];
+  double y2 = atoms->y_pos[j];
+  double z1 = atoms->z_pos[i];
+  double z2 = atoms->z_pos[j];
 
   return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2) +
               (z1 - z2) * (z1 - z2));
@@ -61,7 +68,7 @@ int PDH_baseline(atoms_data *atoms, histogram *hist) {
 
   for (i = 0; i < atoms->len; i++) {
     for (j = i + 1; j < atoms->len; j++) {
-      dist = p2p_distance(atoms->arr[i], atoms->arr[j]);
+      dist = p2p_distance(atoms, i, j);
       int h_pos = (int)(dist / hist->resolution);
       if (h_pos >= hist->len)
         continue;
@@ -73,8 +80,9 @@ int PDH_baseline(atoms_data *atoms, histogram *hist) {
 }
 
 /* CUDA PDH kernel */
-__global__ void PDH_cuda_kernel(atom *atoms, long long atoms_len, bucket *hist,
-                                int hist_len, double resolution) {
+__global__ void PDH_cuda_kernel(double *x_pos, double *y_pos, double *z_pos,
+                                unsigned long long atoms_len, bucket *hist,
+                                unsigned int hist_len, double resolution) {
   int x = blockDim.x * blockIdx.x + threadIdx.x;
   int y = blockDim.y * blockIdx.y + threadIdx.y;
 
@@ -83,7 +91,9 @@ __global__ void PDH_cuda_kernel(atom *atoms, long long atoms_len, bucket *hist,
     return;
 
   // Calculate the distance between the two atoms
-  double dist = p2p_distance(atoms[x], atoms[y]);
+  atoms_data atoms = {
+      .x_pos = x_pos, .y_pos = y_pos, .z_pos = z_pos, .len = atoms_len};
+  double dist = p2p_distance(&atoms, x, y);
 
   // Calculate the histogram position
   int h_pos = (int)(dist / resolution);
@@ -110,26 +120,23 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
   dim3 block_dim(block_size, block_size);
   dim3 grid_dim((atoms_gpu->len + block_dim.x - 1) / block_dim.x,
                 (atoms_gpu->len + block_dim.y - 1) / block_dim.y);
+  printf("Grid dimensions: %d x %d\n", grid_dim.x, grid_dim.y);
+  printf("Block dimensions: %d x %d\n", block_dim.x, block_dim.y);
 
   cudaEvent_t start_time, end_time;
-  cudaEventCreate(&start_time);
-  cudaEventCreate(&end_time);
-  cudaEventRecord(start_time, 0);
+  CHECK_CUDA_ERROR(cudaEventCreate(&start_time));
+  CHECK_CUDA_ERROR(cudaEventCreate(&end_time));
+  CHECK_CUDA_ERROR(cudaEventRecord(start_time, 0));
+
   // Launch the kernel
-  PDH_cuda_kernel<<<grid_dim, block_dim>>>(atoms_gpu->arr, atoms_gpu->len,
-                                           hist_gpu->arr, hist_gpu->len,
-                                           hist_gpu->resolution);
+  PDH_cuda_kernel<<<grid_dim, block_dim>>>(
+      atoms_gpu->x_pos, atoms_gpu->y_pos, atoms_gpu->z_pos, atoms_gpu->len,
+      hist_gpu->arr, hist_gpu->len, hist_gpu->resolution);
   cudaEventRecord(end_time, 0);
   cudaEventSynchronize(end_time);
   cudaEventElapsedTime(diff, start_time, end_time);
   cudaEventDestroy(start_time);
   cudaEventDestroy(end_time);
-
-  // Check for kernel launch errors
-  CHECK_CUDA_ERROR(cudaGetLastError());
-
-  // Synchronize to ensure kernel completion
-  CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
   return 0;
 }
@@ -224,30 +231,38 @@ int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
     }
 
     // Initialize data on the GPU
-    atom *atoms_arr_gpu;
-    bucket *hist_arr_gpu;
-    CHECK_CUDA_ERROR(cudaMalloc(&atoms_arr_gpu, sizeof(atom) * atoms->len));
-    CHECK_CUDA_ERROR(cudaMalloc(&hist_arr_gpu, sizeof(bucket) * hist->len));
+    atoms_data atoms_gpu = {
+        .x_pos = NULL, .y_pos = NULL, .z_pos = NULL, .len = atoms->len};
+    histogram hist_gpu = {
+        .arr = NULL, .len = hist->len, .resolution = hist->resolution};
+    CHECK_CUDA_ERROR(cudaMalloc(&atoms_gpu.x_pos, sizeof(double) * atoms->len));
+    CHECK_CUDA_ERROR(cudaMalloc(&atoms_gpu.y_pos, sizeof(double) * atoms->len));
+    CHECK_CUDA_ERROR(cudaMalloc(&atoms_gpu.z_pos, sizeof(double) * atoms->len));
+    CHECK_CUDA_ERROR(cudaMalloc(&hist_gpu.arr, sizeof(bucket) * hist->len));
 
     // Copy data to GPU with error checking
-    CHECK_CUDA_ERROR(cudaMemcpy(atoms_arr_gpu, atoms->arr,
-                                sizeof(atom) * atoms->len,
+    CHECK_CUDA_ERROR(cudaMemcpy(atoms_gpu.x_pos, atoms->x_pos,
+                                sizeof(double) * atoms->len,
                                 cudaMemcpyHostToDevice));
-    CHECK_CUDA_ERROR(cudaMemcpy(hist_arr_gpu, hist->arr,
+    CHECK_CUDA_ERROR(cudaMemcpy(atoms_gpu.y_pos, atoms->y_pos,
+                                sizeof(double) * atoms->len,
+                                cudaMemcpyHostToDevice));
+    CHECK_CUDA_ERROR(cudaMemcpy(atoms_gpu.z_pos, atoms->z_pos,
+                                sizeof(double) * atoms->len,
+                                cudaMemcpyHostToDevice));
+    CHECK_CUDA_ERROR(cudaMemcpy(hist_gpu.arr, hist->arr,
                                 sizeof(bucket) * hist->len,
                                 cudaMemcpyHostToDevice));
-
-    // Initialize the atoms and histogram data structures. Thsese will hold the
-    // data on the GPU
-    atoms_data atoms_gpu = {atoms_arr_gpu, atoms->len};
-    histogram hist_gpu = {hist_arr_gpu, hist->len, hist->resolution};
 
     // Do the calculation and get the time
     if (time_and_fill_histogram_gpu(&atoms_gpu, &hist_gpu, block_size, time,
                                     PDH_cuda) != 0) {
       fprintf(stderr, "Error running the algorithm on the GPU\n");
-      cudaFree(atoms_arr_gpu);
-      cudaFree(hist_arr_gpu);
+      cudaFree(atoms_gpu.x_pos);
+      cudaFree(atoms_gpu.y_pos);
+      cudaFree(atoms_gpu.z_pos);
+      cudaFree(hist_gpu.arr);
+
       return -1;
     }
 
@@ -256,9 +271,10 @@ int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
                                 sizeof(bucket) * hist->len,
                                 cudaMemcpyDeviceToHost));
 
-    cudaFree(atoms_arr_gpu);
-    cudaFree(hist_arr_gpu);
-
+    cudaFree(atoms_gpu.x_pos);
+    cudaFree(atoms_gpu.y_pos);
+    cudaFree(atoms_gpu.z_pos);
+    cudaFree(hist_gpu.arr);
     // Display histogram
     display_histogram(hist);
 
@@ -271,30 +287,27 @@ int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
 }
 
 /* Atoms data generation function */
-atoms_data init_atoms_data(unsigned int count, int box_size) {
-  atom *atoms_arr = (atom *)malloc(sizeof(atom) * count);
-  if (atoms_arr == NULL) {
-    fprintf(stderr, "Error allocating memory for atoms\n");
-    exit(1);
-  }
+atoms_data atoms_data_init(unsigned int count, int box_size) {
   atoms_data atoms = {
-      atoms_arr,
-      count,
+      .x_pos = (double *)malloc(count * sizeof(double)),
+      .y_pos = (double *)malloc(count * sizeof(double)),
+      .z_pos = (double *)malloc(count * sizeof(double)),
+      .len = count,
   };
 
   // Generate random data points
   srand(1); // Fixed seed for reproducibility
   for (int i = 0; i < atoms.len; i++) {
-    atoms.arr[i].x_pos = ((double)(rand()) / RAND_MAX) * box_size;
-    atoms.arr[i].y_pos = ((double)(rand()) / RAND_MAX) * box_size;
-    atoms.arr[i].z_pos = ((double)(rand()) / RAND_MAX) * box_size;
+    atoms.x_pos[i] = ((double)(rand()) / RAND_MAX) * box_size;
+    atoms.y_pos[i] = ((double)(rand()) / RAND_MAX) * box_size;
+    atoms.z_pos[i] = ((double)(rand()) / RAND_MAX) * box_size;
   }
 
   return atoms;
 }
 
 /* Histogram initialization function */
-histogram init_histogram(double resolution, int box_size) {
+histogram histogram_init(double resolution, int box_size) {
   // The maximum distance between two points in a box is the diagonal
   unsigned int num_buckets =
       (unsigned int)(box_size * sqrt(3) / resolution) + 1;
@@ -324,9 +337,9 @@ int main(int argc, char **argv) {
   int block_size = atoi(argv[3]);
 
   // Generate heap-allocated data
-  atoms_data atoms = init_atoms_data(particle_count, BOX_SIZE);
-  histogram hist_cpu = init_histogram(resolution, BOX_SIZE);
-  histogram hist_gpu = init_histogram(resolution, BOX_SIZE);
+  atoms_data atoms = atoms_data_init(particle_count, BOX_SIZE);
+  histogram hist_cpu = histogram_init(resolution, BOX_SIZE);
+  histogram hist_gpu = histogram_init(resolution, BOX_SIZE);
 
   // Run algorithms
   float time_cpu, time_gpu;
@@ -334,7 +347,9 @@ int main(int argc, char **argv) {
       0) {
     printf("Error running CPU version. Exiting\n");
     free(hist_cpu.arr);
-    free(atoms.arr);
+    free(atoms.x_pos);
+    free(atoms.y_pos);
+    free(atoms.z_pos);
     free(hist_gpu.arr);
     return 1;
   }
@@ -342,7 +357,9 @@ int main(int argc, char **argv) {
                                       block_size) != 0) {
     printf("Error running GPU version. Exiting\n");
     free(hist_cpu.arr);
-    free(atoms.arr);
+    free(atoms.x_pos);
+    free(atoms.y_pos);
+    free(atoms.z_pos);
     free(hist_gpu.arr);
     return 1;
   }
@@ -362,7 +379,9 @@ int main(int argc, char **argv) {
   display_histogram(&hist_cpu);
 
   free(hist_gpu.arr);
-  free(atoms.arr);
+  free(atoms.x_pos);
+  free(atoms.y_pos);
+  free(atoms.z_pos);
   free(hist_cpu.arr);
 
   return 0;
