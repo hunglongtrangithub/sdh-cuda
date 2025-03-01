@@ -44,23 +44,6 @@ typedef struct atom_list {
   unsigned long long len;
 } atoms_data;
 
-/* Helper function to calculate distance between two points */
-__host__ __device__ double p2p_distance(atoms_data *atoms, int i, int j) {
-  if (i == j)
-    return 0.0;
-  if (i >= atoms->len || j >= atoms->len)
-    return -1.0;
-  double x1 = atoms->x_pos[i];
-  double x2 = atoms->x_pos[j];
-  double y1 = atoms->y_pos[i];
-  double y2 = atoms->y_pos[j];
-  double z1 = atoms->z_pos[i];
-  double z2 = atoms->z_pos[j];
-
-  return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2) +
-              (z1 - z2) * (z1 - z2));
-}
-
 /* Core SDH algorithm. Mutates the histogram */
 int PDH_baseline(atoms_data *atoms, histogram *hist) {
   int i, j;
@@ -68,7 +51,12 @@ int PDH_baseline(atoms_data *atoms, histogram *hist) {
 
   for (i = 0; i < atoms->len; i++) {
     for (j = i + 1; j < atoms->len; j++) {
-      dist = p2p_distance(atoms, i, j);
+      dist = sqrt((atoms->x_pos[i] - atoms->x_pos[j]) *
+                      (atoms->x_pos[i] - atoms->x_pos[j]) +
+                  (atoms->y_pos[i] - atoms->y_pos[j]) *
+                      (atoms->y_pos[i] - atoms->y_pos[j]) +
+                  (atoms->z_pos[i] - atoms->z_pos[j]) *
+                      (atoms->z_pos[i] - atoms->z_pos[j]));
       int h_pos = (int)(dist / hist->resolution);
       if (h_pos >= hist->len)
         continue;
@@ -91,9 +79,9 @@ __global__ void PDH_cuda_kernel(double *x_pos, double *y_pos, double *z_pos,
     return;
 
   // Calculate the distance between the two atoms
-  atoms_data atoms = {
-      .x_pos = x_pos, .y_pos = y_pos, .z_pos = z_pos, .len = atoms_len};
-  double dist = p2p_distance(&atoms, x, y);
+  double dist = sqrt((x_pos[x] - x_pos[y]) * (x_pos[x] - x_pos[y]) +
+                     (y_pos[x] - y_pos[y]) * (y_pos[x] - y_pos[y]) +
+                     (z_pos[x] - z_pos[y]) * (z_pos[x] - z_pos[y]));
 
   // Calculate the histogram position
   int h_pos = (int)(dist / resolution);
@@ -209,8 +197,8 @@ int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
       return -1;
     }
 
-    // Display histogram
-    display_histogram(hist);
+    // // Display histogram
+    // display_histogram(hist);
 
     *time = (double)(time_diff.tv_sec * 1000 + time_diff.tv_nsec / 1000000.0);
     return 0;
@@ -275,8 +263,9 @@ int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
     cudaFree(atoms_gpu.y_pos);
     cudaFree(atoms_gpu.z_pos);
     cudaFree(hist_gpu.arr);
-    // Display histogram
-    display_histogram(hist);
+
+    // // Display histogram
+    // display_histogram(hist);
 
     return 0;
   }
@@ -374,9 +363,9 @@ int main(int argc, char **argv) {
   printf("GPU time in miliseconds: %f\n", time_gpu);
   printf("Speedup: %f\n", time_cpu / time_gpu);
 
-  // Display the diff histogram
-  printf("Diff histogram:\n");
-  display_histogram(&hist_cpu);
+  // // Display the diff histogram
+  // printf("Diff histogram:\n");
+  // display_histogram(&hist_cpu);
 
   free(hist_gpu.arr);
   free(atoms.x_pos);
