@@ -5,7 +5,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/time.h>
+#include <time.h>
 
 #define BOX_SIZE 23000
 /* CUDA error checking helper function */
@@ -92,6 +92,8 @@ __global__ void PDH_cuda_kernel(double *x_pos, double *y_pos, double *z_pos,
   atomicAdd(&hist[h_pos].d_cnt, 1);
 }
 
+__global__ void PDH_cuda_kernel() {}
+
 /* CUDA PDH algorithm. Mutates the histogram */
 int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
              float *diff) {
@@ -149,8 +151,8 @@ void display_histogram(histogram *hist) {
 
 struct timespec calculate_time(const struct timespec *start,
                                const struct timespec *end) {
-  struct timespec diff = {.tv_sec = start->tv_sec - end->tv_sec, //
-                          .tv_nsec = start->tv_nsec - end->tv_nsec};
+  struct timespec diff = {.tv_sec = end->tv_sec - start->tv_sec, //
+                          .tv_nsec = end->tv_nsec - start->tv_nsec};
   if (diff.tv_nsec < 0) {
     diff.tv_nsec += 1000000000; // nsec/sec
     diff.tv_sec--;
@@ -164,10 +166,18 @@ int time_and_fill_histogram_cpu(atoms_data *atoms, histogram *hist,
                                 struct timespec *diff) {
   struct timespec start_time;
   struct timespec end_time;
+
+  // Record the start time
+  clock_gettime(CLOCK_MONOTONIC, &start_time);
+
   if (algorithm(atoms, hist) != 0) {
     return -1;
   }
 
+  // Record the end time
+  clock_gettime(CLOCK_MONOTONIC, &end_time);
+
+  // Calculate the time difference
   *diff = calculate_time(&start_time, &end_time);
   return 0;
 }
