@@ -1,6 +1,3 @@
-#include <cuda_device_runtime_api.h>
-#include <cuda_runtime.h>
-#include <driver_types.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -18,7 +15,7 @@
       return -1;                                                               \
     }                                                                          \
   }
-
+#define min(a, b) ((a) < (b) ? (a) : (b))
 enum platform { CPU, GPU };
 
 enum kernel_algorithm { GRID_2D, SHARED_MEM };
@@ -104,9 +101,10 @@ __global__ void PDH_cuda_kernel_shared_mem(double *x_pos, double *y_pos,
   int idx = blockDim.x * blockIdx.x + threadIdx.x;
   if (idx >= atoms_len)
     return;
-  extern __shared__ double x_shared[];
-  extern __shared__ double y_shared[];
-  extern __shared__ double z_shared[];
+  extern __shared__ double shared_data[]; // Single shared memory block
+  double *x_shared = shared_data;
+  double *y_shared = &shared_data[blockDim.x];
+  double *z_shared = &shared_data[2 * blockDim.x];
 
   double x = x_pos[idx];
   double y = y_pos[idx];
@@ -115,18 +113,16 @@ __global__ void PDH_cuda_kernel_shared_mem(double *x_pos, double *y_pos,
   // Loop through each next block from the current block
   for (int i = blockIdx.x + 1; i < gridDim.x; i++) {
     // Load the block into shared memory
-    if (blockDim.x * i + threadIdx.x < atoms_len) {
-      x_shared[threadIdx.x] = x_pos[blockDim.x * i + threadIdx.x];
-      y_shared[threadIdx.x] = y_pos[blockDim.x * i + threadIdx.x];
-      z_shared[threadIdx.x] = z_pos[blockDim.x * i + threadIdx.x];
+    int i_global = blockDim.x * i + threadIdx.x;
+    if (i_global < atoms_len) {
+      x_shared[threadIdx.x] = x_pos[i_global];
+      y_shared[threadIdx.x] = y_pos[i_global];
+      z_shared[threadIdx.x] = z_pos[i_global];
     }
     __syncthreads();
 
     // Loop through each atom in the cached block
-    for (int j = 0; j < blockDim.x; j++) {
-      // Stop if the thread is out of bounds
-      if (blockDim.x * i + j >= atoms_len)
-        break;
+    for (int j = 0; j < min(blockDim.x, atoms_len - i * blockDim.x); j++) {
       double dist = sqrt((x - x_shared[j]) * (x - x_shared[j]) +
                          (y - y_shared[j]) * (y - y_shared[j]) +
                          (z - z_shared[j]) * (z - z_shared[j]));
@@ -134,6 +130,26 @@ __global__ void PDH_cuda_kernel_shared_mem(double *x_pos, double *y_pos,
       if (h_pos < hist_len) {
         atomicAdd(&hist[h_pos].d_cnt, 1);
       }
+    }
+  }
+
+  // Load the current block into shared memory
+  if (idx < atoms_len) {
+    x_shared[threadIdx.x] = x;
+    y_shared[threadIdx.x] = y;
+    z_shared[threadIdx.x] = z;
+  }
+  __syncthreads();
+
+  // Loop through each atom in the current block
+  for (int i = threadIdx.x + 1;
+       i < min(blockDim.x, atoms_len - blockIdx.x * blockDim.x); i++) {
+    double dist = sqrt((x - x_shared[i]) * (x - x_shared[i]) +
+                       (y - y_shared[i]) * (y - y_shared[i]) +
+                       (z - z_shared[i]) * (z - z_shared[i]));
+    int h_pos = (int)(dist / resolution);
+    if (h_pos < hist_len) {
+      atomicAdd(&hist[h_pos].d_cnt, 1);
     }
   }
 }
@@ -148,13 +164,20 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     fprintf(stderr, "No CUDA devices found\n");
     return -1;
   }
+  cudaDeviceProp deviceProp;
+  CHECK_CUDA_ERROR(cudaGetDeviceProperties(&deviceProp, 0));
 
   switch (algorithm) {
   case GRID_2D: {
-    printf("Running baseline kernel\n");
+    printf("Running baseline kernel using 2D grid\n");
+    if (block_size > deviceProp.maxThreadsPerBlock) {
+      fprintf(stderr, "Block size is too large. Must be less than %d\n",
+              deviceProp.maxThreadsPerBlock);
+      return -1;
+    }
+
     // Define the number of blocks and threads per block
-    // Maximum x, y dimensions of a block are typically 1024 threads
-    dim3 block_dim(block_size, block_size);
+    dim3 block_dim(sqrt(block_size), sqrt(block_size));
     dim3 grid_dim((atoms_gpu->len + block_dim.x - 1) / block_dim.x,
                   (atoms_gpu->len + block_dim.y - 1) / block_dim.y);
     printf("Grid dimensions: %d x %d\n", grid_dim.x, grid_dim.y);
@@ -169,16 +192,26 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     PDH_cuda_kernel_grid_2d<<<grid_dim, block_dim>>>(
         atoms_gpu->x_pos, atoms_gpu->y_pos, atoms_gpu->z_pos, atoms_gpu->len,
         hist_gpu->arr, hist_gpu->len, hist_gpu->resolution);
+    CHECK_CUDA_ERROR(cudaPeekAtLastError());
+    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
     CHECK_CUDA_ERROR(cudaEventRecord(end_time, 0));
     CHECK_CUDA_ERROR(cudaEventSynchronize(end_time));
     CHECK_CUDA_ERROR(cudaEventElapsedTime(diff, start_time, end_time));
     CHECK_CUDA_ERROR(cudaEventDestroy(start_time));
     CHECK_CUDA_ERROR(cudaEventDestroy(end_time));
+    break;
   }
   case SHARED_MEM: {
-    printf("Running optimized kernel\n");
+    printf("Running kernel using shared memory\n");
     int grid_size = (atoms_gpu->len + block_size - 1) / block_size;
-    int shared_mem_size = block_size * sizeof(double);
+    // We need to allocate enough space for the block size * 3 (x, y, z)
+    int shared_mem_size = 3 * block_size * sizeof(double);
+    if (shared_mem_size > deviceProp.sharedMemPerBlock) {
+      fprintf(stderr,
+              "Shared memory size is too large. Must be less than %zu\n",
+              deviceProp.sharedMemPerBlock);
+      return -1;
+    }
     printf("Grid size: %d\n", grid_size);
     printf("Block size: %d\n", block_size);
     printf("Shared memory size: %d\n", shared_mem_size);
@@ -192,11 +225,14 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     PDH_cuda_kernel_shared_mem<<<grid_size, block_size, shared_mem_size>>>(
         atoms_gpu->x_pos, atoms_gpu->y_pos, atoms_gpu->z_pos, atoms_gpu->len,
         hist_gpu->arr, hist_gpu->len, hist_gpu->resolution);
+    CHECK_CUDA_ERROR(cudaPeekAtLastError());
+    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
     CHECK_CUDA_ERROR(cudaEventRecord(end_time, 0));
     CHECK_CUDA_ERROR(cudaEventSynchronize(end_time));
     CHECK_CUDA_ERROR(cudaEventElapsedTime(diff, start_time, end_time));
     CHECK_CUDA_ERROR(cudaEventDestroy(start_time));
     CHECK_CUDA_ERROR(cudaEventDestroy(end_time));
+    break;
   }
   }
 
@@ -414,9 +450,9 @@ int main(int argc, char **argv) {
   // Run algorithms
   float time_gpu_grid_2d, time_gpu_shared_mem;
   if (calculate_and_display_histogram(&atoms, &hist_grid_2d, GPU,
-                                      &time_gpu_grid_2d, 1, block_size,
+                                      &time_gpu_grid_2d, 2, block_size,
                                       GRID_2D) != 0) {
-    printf("Error running GPU 2D grid version. Exiting\n");
+    printf("Error running GPU 2D grid (baseline) version. Exiting\n");
     free(hist_grid_2d.arr);
     free(hist_shared_mem.arr);
     free(atoms.x_pos);
@@ -425,7 +461,7 @@ int main(int argc, char **argv) {
     return 1;
   }
   if (calculate_and_display_histogram(&atoms, &hist_shared_mem, GPU,
-                                      &time_gpu_shared_mem, 1, block_size,
+                                      &time_gpu_shared_mem, 2, block_size,
                                       SHARED_MEM) != 0) {
     printf("Error running GPU shared memory version. Exiting\n");
     free(hist_grid_2d.arr);
@@ -436,7 +472,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  printf("GPU 2D grid version histogram:\n");
+  printf("GPU 2D grid (baseline) version histogram:\n");
   display_histogram(&hist_grid_2d);
   printf("GPU shared memory version histogram:\n");
   display_histogram(&hist_shared_mem);
@@ -449,8 +485,8 @@ int main(int argc, char **argv) {
   display_histogram(&hist_grid_2d);
 
   // Display timing results
-  printf("GPU time in miliseconds (baseline): %f\n", time_gpu_grid_2d);
-  printf("GPU time in miliseconds (optimized): %f\n", time_gpu_shared_mem);
+  printf("GPU time in miliseconds (2D grid): %f\n", time_gpu_grid_2d);
+  printf("GPU time in miliseconds (shared memory): %f\n", time_gpu_shared_mem);
 
   free(hist_grid_2d.arr);
   free(hist_shared_mem.arr);
