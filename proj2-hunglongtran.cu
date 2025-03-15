@@ -406,34 +406,48 @@ int main(int argc, char **argv) {
 
   // Generate heap-allocated data
   atoms_data atoms = atoms_data_init(particle_count, BOX_SIZE);
-  histogram hist = histogram_init(resolution, BOX_SIZE);
+  histogram hist_baseline = histogram_init(resolution, BOX_SIZE);
+  histogram hist_optimized = histogram_init(resolution, BOX_SIZE);
 
   // Run algorithms
   float time_gpu_baseline, time_gpu_optimized;
-  if (calculate_and_display_histogram(&atoms, &hist, GPU, &time_gpu_baseline, 1,
-                                      block_size, BASELINE) != 0) {
+  if (calculate_and_display_histogram(&atoms, &hist_baseline, GPU,
+                                      &time_gpu_baseline, 1, block_size,
+                                      BASELINE) != 0) {
     printf("Error running GPU baseline version. Exiting\n");
-    free(hist.arr);
+    free(hist_baseline.arr);
+    free(hist_optimized.arr);
     free(atoms.x_pos);
     free(atoms.y_pos);
     free(atoms.z_pos);
     return 1;
   }
-  if (calculate_and_display_histogram(&atoms, &hist, GPU, &time_gpu_optimized,
-                                      1, block_size, OPTIMIZED) != 0) {
+  if (calculate_and_display_histogram(&atoms, &hist_optimized, GPU,
+                                      &time_gpu_optimized, 1, block_size,
+                                      OPTIMIZED) != 0) {
     printf("Error running GPU optimized version. Exiting\n");
-    free(hist.arr);
+    free(hist_baseline.arr);
+    free(hist_optimized.arr);
     free(atoms.x_pos);
     free(atoms.y_pos);
     free(atoms.z_pos);
     return 1;
   }
+
+  // Calculate the difference histogram between the two histograms
+  for (int i = 0; i < hist_baseline.len; i++) {
+    hist_baseline.arr[i].d_cnt -= hist_optimized.arr[i].d_cnt;
+  }
+  // Display the difference histogram
+  printf("Difference histogram:\n");
+  display_histogram(&hist_baseline);
 
   // Display timing results
   printf("GPU time in miliseconds (baseline): %f\n", time_gpu_baseline);
   printf("GPU time in miliseconds (optimized): %f\n", time_gpu_optimized);
 
-  free(hist.arr);
+  free(hist_baseline.arr);
+  free(hist_optimized.arr);
   free(atoms.x_pos);
   free(atoms.y_pos);
   free(atoms.z_pos);
