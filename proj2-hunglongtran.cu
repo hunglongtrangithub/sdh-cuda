@@ -21,6 +21,8 @@
 
 enum platform { CPU, GPU };
 
+enum kernel_algorithm { BASELINE, OPTIMIZED };
+
 typedef struct atomdesc {
   double x_pos;
   double y_pos;
@@ -92,11 +94,51 @@ __global__ void PDH_cuda_kernel(double *x_pos, double *y_pos, double *z_pos,
   atomicAdd(&hist[h_pos].d_cnt, 1);
 }
 
-__global__ void PDH_cuda_kernel() {}
+__global__ void PDH_cuda_kernel_optimized(double *x_pos, double *y_pos,
+                                          double *z_pos,
+                                          unsigned long long atoms_len,
+                                          bucket *hist, unsigned int hist_len,
+                                          double resolution) {
+  int idx = blockDim.x * blockIdx.x + threadIdx.x;
+  if (idx >= atoms_len)
+    return;
+  extern __shared__ double x_shared[];
+  extern __shared__ double y_shared[];
+  extern __shared__ double z_shared[];
+
+  double x = x_pos[idx];
+  double y = y_pos[idx];
+  double z = z_pos[idx];
+
+  // Loop through each next block from the current block
+  for (int i = blockIdx.x + 1; i < gridDim.x; i++) {
+    // Load the block into shared memory
+    if (blockDim.x * i + threadIdx.x < atoms_len) {
+      x_shared[threadIdx.x] = x_pos[blockDim.x * i + threadIdx.x];
+      y_shared[threadIdx.x] = y_pos[blockDim.x * i + threadIdx.x];
+      z_shared[threadIdx.x] = z_pos[blockDim.x * i + threadIdx.x];
+    }
+    __syncthreads();
+
+    // Loop through each atom in the cached block
+    for (int j = 0; j < blockDim.x; j++) {
+      // Stop if the thread is out of bounds
+      if (blockDim.x * i + j >= atoms_len)
+        break;
+      double dist = sqrt((x - x_shared[j]) * (x - x_shared[j]) +
+                         (y - y_shared[j]) * (y - y_shared[j]) +
+                         (z - z_shared[j]) * (z - z_shared[j]));
+      int h_pos = (int)(dist / resolution);
+      if (h_pos < hist_len) {
+        atomicAdd(&hist[h_pos].d_cnt, 1);
+      }
+    }
+  }
+}
 
 /* CUDA PDH algorithm. Mutates the histogram */
 int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
-             float *diff) {
+             float *diff, kernel_algorithm algorithm) {
   // Check if CUDA device is available
   int deviceCount;
   CHECK_CUDA_ERROR(cudaGetDeviceCount(&deviceCount));
@@ -105,28 +147,56 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     return -1;
   }
 
-  // Define the number of blocks and threads per block
-  // // Maximum x, y dimensions of a block are typically 1024 threads
-  dim3 block_dim(block_size, block_size);
-  dim3 grid_dim((atoms_gpu->len + block_dim.x - 1) / block_dim.x,
-                (atoms_gpu->len + block_dim.y - 1) / block_dim.y);
-  printf("Grid dimensions: %d x %d\n", grid_dim.x, grid_dim.y);
-  printf("Block dimensions: %d x %d\n", block_dim.x, block_dim.y);
+  switch (algorithm) {
+  case BASELINE: {
+    printf("Running baseline kernel\n");
+    // Define the number of blocks and threads per block
+    // Maximum x, y dimensions of a block are typically 1024 threads
+    dim3 block_dim(block_size, block_size);
+    dim3 grid_dim((atoms_gpu->len + block_dim.x - 1) / block_dim.x,
+                  (atoms_gpu->len + block_dim.y - 1) / block_dim.y);
+    printf("Grid dimensions: %d x %d\n", grid_dim.x, grid_dim.y);
+    printf("Block dimensions: %d x %d\n", block_dim.x, block_dim.y);
 
-  cudaEvent_t start_time, end_time;
-  CHECK_CUDA_ERROR(cudaEventCreate(&start_time));
-  CHECK_CUDA_ERROR(cudaEventCreate(&end_time));
-  CHECK_CUDA_ERROR(cudaEventRecord(start_time, 0));
+    cudaEvent_t start_time, end_time;
+    CHECK_CUDA_ERROR(cudaEventCreate(&start_time));
+    CHECK_CUDA_ERROR(cudaEventCreate(&end_time));
+    CHECK_CUDA_ERROR(cudaEventRecord(start_time, 0));
 
-  // Launch the kernel
-  PDH_cuda_kernel<<<grid_dim, block_dim>>>(
-      atoms_gpu->x_pos, atoms_gpu->y_pos, atoms_gpu->z_pos, atoms_gpu->len,
-      hist_gpu->arr, hist_gpu->len, hist_gpu->resolution);
-  cudaEventRecord(end_time, 0);
-  cudaEventSynchronize(end_time);
-  cudaEventElapsedTime(diff, start_time, end_time);
-  cudaEventDestroy(start_time);
-  cudaEventDestroy(end_time);
+    // Launch the kernel
+    PDH_cuda_kernel<<<grid_dim, block_dim>>>(
+        atoms_gpu->x_pos, atoms_gpu->y_pos, atoms_gpu->z_pos, atoms_gpu->len,
+        hist_gpu->arr, hist_gpu->len, hist_gpu->resolution);
+    CHECK_CUDA_ERROR(cudaEventRecord(end_time, 0));
+    CHECK_CUDA_ERROR(cudaEventSynchronize(end_time));
+    CHECK_CUDA_ERROR(cudaEventElapsedTime(diff, start_time, end_time));
+    CHECK_CUDA_ERROR(cudaEventDestroy(start_time));
+    CHECK_CUDA_ERROR(cudaEventDestroy(end_time));
+  }
+  case OPTIMIZED: {
+    printf("Running optimized kernel\n");
+    int grid_size = (atoms_gpu->len + block_size - 1) / block_size;
+    int shared_mem_size = block_size * sizeof(double);
+    printf("Grid size: %d\n", grid_size);
+    printf("Block size: %d\n", block_size);
+    printf("Shared memory size: %d\n", shared_mem_size);
+
+    cudaEvent_t start_time, end_time;
+    CHECK_CUDA_ERROR(cudaEventCreate(&start_time));
+    CHECK_CUDA_ERROR(cudaEventCreate(&end_time));
+    CHECK_CUDA_ERROR(cudaEventRecord(start_time, 0));
+
+    // Launch the kernel
+    PDH_cuda_kernel_optimized<<<grid_size, block_size, shared_mem_size>>>(
+        atoms_gpu->x_pos, atoms_gpu->y_pos, atoms_gpu->z_pos, atoms_gpu->len,
+        hist_gpu->arr, hist_gpu->len, hist_gpu->resolution);
+    CHECK_CUDA_ERROR(cudaEventRecord(end_time, 0));
+    CHECK_CUDA_ERROR(cudaEventSynchronize(end_time));
+    CHECK_CUDA_ERROR(cudaEventElapsedTime(diff, start_time, end_time));
+    CHECK_CUDA_ERROR(cudaEventDestroy(start_time));
+    CHECK_CUDA_ERROR(cudaEventDestroy(end_time));
+  }
+  }
 
   return 0;
 }
@@ -160,7 +230,8 @@ struct timespec calculate_time(const struct timespec *start,
   return diff;
 }
 
-/* Timing and histogram filling function. The algorithm mutates the histogram */
+/* Timing and histogram filling function. The algorithm mutates the histogram
+ */
 int time_and_fill_histogram_cpu(atoms_data *atoms, histogram *hist,
                                 int (*algorithm)(atoms_data *, histogram *),
                                 struct timespec *diff) {
@@ -184,9 +255,11 @@ int time_and_fill_histogram_cpu(atoms_data *atoms, histogram *hist,
 
 int time_and_fill_histogram_gpu(atoms_data *atoms, histogram *hist,
                                 int block_size, float *diff,
-                                int (*algorithm)(atoms_data *, histogram *,
-                                                 int block_size, float *diff)) {
-  if (algorithm(atoms, hist, block_size, diff) != 0) {
+                                kernel_algorithm algorithm,
+                                int (*kernel)(atoms_data *, histogram *,
+                                              int block_size, float *diff,
+                                              kernel_algorithm algorithm)) {
+  if (kernel(atoms, hist, block_size, diff, algorithm) != 0) {
     return -1;
   }
   return 0;
@@ -207,9 +280,6 @@ int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
       return -1;
     }
 
-    // // Display histogram
-    // display_histogram(hist);
-
     *time = (double)(time_diff.tv_sec * 1000 + time_diff.tv_nsec / 1000000.0);
     return 0;
   }
@@ -219,6 +289,8 @@ int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
     va_list args;
     va_start(args, count);
     int block_size = va_arg(args, int);
+    int algorithm_int = va_arg(args, int);
+    kernel_algorithm algorithm = static_cast<kernel_algorithm>(algorithm_int);
     va_end(args);
 
     // Check if CUDA device is available
@@ -254,12 +326,12 @@ int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
 
     // Do the calculation and get the time
     if (time_and_fill_histogram_gpu(&atoms_gpu, &hist_gpu, block_size, time,
-                                    PDH_cuda) != 0) {
+                                    algorithm, PDH_cuda) != 0) {
       fprintf(stderr, "Error running the algorithm on the GPU\n");
-      cudaFree(atoms_gpu.x_pos);
-      cudaFree(atoms_gpu.y_pos);
-      cudaFree(atoms_gpu.z_pos);
-      cudaFree(hist_gpu.arr);
+      CHECK_CUDA_ERROR(cudaFree(atoms_gpu.x_pos));
+      CHECK_CUDA_ERROR(cudaFree(atoms_gpu.y_pos));
+      CHECK_CUDA_ERROR(cudaFree(atoms_gpu.z_pos));
+      CHECK_CUDA_ERROR(cudaFree(hist_gpu.arr));
 
       return -1;
     }
@@ -269,13 +341,10 @@ int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
                                 sizeof(bucket) * hist->len,
                                 cudaMemcpyDeviceToHost));
 
-    cudaFree(atoms_gpu.x_pos);
-    cudaFree(atoms_gpu.y_pos);
-    cudaFree(atoms_gpu.z_pos);
-    cudaFree(hist_gpu.arr);
-
-    // // Display histogram
-    // display_histogram(hist);
+    CHECK_CUDA_ERROR(cudaFree(atoms_gpu.x_pos));
+    CHECK_CUDA_ERROR(cudaFree(atoms_gpu.y_pos));
+    CHECK_CUDA_ERROR(cudaFree(atoms_gpu.z_pos));
+    CHECK_CUDA_ERROR(cudaFree(hist_gpu.arr));
 
     return 0;
   }
@@ -337,51 +406,37 @@ int main(int argc, char **argv) {
 
   // Generate heap-allocated data
   atoms_data atoms = atoms_data_init(particle_count, BOX_SIZE);
-  histogram hist_cpu = histogram_init(resolution, BOX_SIZE);
-  histogram hist_gpu = histogram_init(resolution, BOX_SIZE);
+  histogram hist = histogram_init(resolution, BOX_SIZE);
 
   // Run algorithms
-  float time_cpu, time_gpu;
-  if (calculate_and_display_histogram(&atoms, &hist_cpu, CPU, &time_cpu, 0) !=
-      0) {
-    printf("Error running CPU version. Exiting\n");
-    free(hist_cpu.arr);
+  float time_gpu_baseline, time_gpu_optimized;
+  if (calculate_and_display_histogram(&atoms, &hist, GPU, &time_gpu_baseline, 1,
+                                      block_size, BASELINE) != 0) {
+    printf("Error running GPU baseline version. Exiting\n");
+    free(hist.arr);
     free(atoms.x_pos);
     free(atoms.y_pos);
     free(atoms.z_pos);
-    free(hist_gpu.arr);
     return 1;
   }
-  if (calculate_and_display_histogram(&atoms, &hist_gpu, GPU, &time_gpu, 1,
-                                      block_size) != 0) {
-    printf("Error running GPU version. Exiting\n");
-    free(hist_cpu.arr);
+  if (calculate_and_display_histogram(&atoms, &hist, GPU, &time_gpu_optimized,
+                                      1, block_size, OPTIMIZED) != 0) {
+    printf("Error running GPU optimized version. Exiting\n");
+    free(hist.arr);
     free(atoms.x_pos);
     free(atoms.y_pos);
     free(atoms.z_pos);
-    free(hist_gpu.arr);
     return 1;
-  }
-
-  // Calculate the diff histogram (stored in hist_cpu)
-  for (int i = 0; i < hist_cpu.len; i++) {
-    hist_cpu.arr[i].d_cnt -= hist_gpu.arr[i].d_cnt;
   }
 
   // Display timing results
-  printf("CPU time in miliseconds: %f\n", time_cpu);
-  printf("GPU time in miliseconds: %f\n", time_gpu);
-  printf("Speedup: %f\n", time_cpu / time_gpu);
+  printf("GPU time in miliseconds (baseline): %f\n", time_gpu_baseline);
+  printf("GPU time in miliseconds (optimized): %f\n", time_gpu_optimized);
 
-  // // Display the diff histogram
-  // printf("Diff histogram:\n");
-  // display_histogram(&hist_cpu);
-
-  free(hist_gpu.arr);
+  free(hist.arr);
   free(atoms.x_pos);
   free(atoms.y_pos);
   free(atoms.z_pos);
-  free(hist_cpu.arr);
 
   return 0;
 }
