@@ -21,7 +21,7 @@
 
 enum platform { CPU, GPU };
 
-enum kernel_algorithm { BASELINE, OPTIMIZED };
+enum kernel_algorithm { GRID_2D, SHARED_MEM };
 
 typedef struct atomdesc {
   double x_pos;
@@ -70,9 +70,11 @@ int PDH_baseline(atoms_data *atoms, histogram *hist) {
 }
 
 /* CUDA PDH kernel */
-__global__ void PDH_cuda_kernel(double *x_pos, double *y_pos, double *z_pos,
-                                unsigned long long atoms_len, bucket *hist,
-                                unsigned int hist_len, double resolution) {
+__global__ void PDH_cuda_kernel_grid_2d(double *x_pos, double *y_pos,
+                                        double *z_pos,
+                                        unsigned long long atoms_len,
+                                        bucket *hist, unsigned int hist_len,
+                                        double resolution) {
   int x = blockDim.x * blockIdx.x + threadIdx.x;
   int y = blockDim.y * blockIdx.y + threadIdx.y;
 
@@ -94,11 +96,11 @@ __global__ void PDH_cuda_kernel(double *x_pos, double *y_pos, double *z_pos,
   atomicAdd(&hist[h_pos].d_cnt, 1);
 }
 
-__global__ void PDH_cuda_kernel_optimized(double *x_pos, double *y_pos,
-                                          double *z_pos,
-                                          unsigned long long atoms_len,
-                                          bucket *hist, unsigned int hist_len,
-                                          double resolution) {
+__global__ void PDH_cuda_kernel_shared_mem(double *x_pos, double *y_pos,
+                                           double *z_pos,
+                                           unsigned long long atoms_len,
+                                           bucket *hist, unsigned int hist_len,
+                                           double resolution) {
   int idx = blockDim.x * blockIdx.x + threadIdx.x;
   if (idx >= atoms_len)
     return;
@@ -148,7 +150,7 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
   }
 
   switch (algorithm) {
-  case BASELINE: {
+  case GRID_2D: {
     printf("Running baseline kernel\n");
     // Define the number of blocks and threads per block
     // Maximum x, y dimensions of a block are typically 1024 threads
@@ -164,7 +166,7 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     CHECK_CUDA_ERROR(cudaEventRecord(start_time, 0));
 
     // Launch the kernel
-    PDH_cuda_kernel<<<grid_dim, block_dim>>>(
+    PDH_cuda_kernel_grid_2d<<<grid_dim, block_dim>>>(
         atoms_gpu->x_pos, atoms_gpu->y_pos, atoms_gpu->z_pos, atoms_gpu->len,
         hist_gpu->arr, hist_gpu->len, hist_gpu->resolution);
     CHECK_CUDA_ERROR(cudaEventRecord(end_time, 0));
@@ -173,7 +175,7 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     CHECK_CUDA_ERROR(cudaEventDestroy(start_time));
     CHECK_CUDA_ERROR(cudaEventDestroy(end_time));
   }
-  case OPTIMIZED: {
+  case SHARED_MEM: {
     printf("Running optimized kernel\n");
     int grid_size = (atoms_gpu->len + block_size - 1) / block_size;
     int shared_mem_size = block_size * sizeof(double);
@@ -187,7 +189,7 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     CHECK_CUDA_ERROR(cudaEventRecord(start_time, 0));
 
     // Launch the kernel
-    PDH_cuda_kernel_optimized<<<grid_size, block_size, shared_mem_size>>>(
+    PDH_cuda_kernel_shared_mem<<<grid_size, block_size, shared_mem_size>>>(
         atoms_gpu->x_pos, atoms_gpu->y_pos, atoms_gpu->z_pos, atoms_gpu->len,
         hist_gpu->arr, hist_gpu->len, hist_gpu->resolution);
     CHECK_CUDA_ERROR(cudaEventRecord(end_time, 0));
@@ -279,7 +281,7 @@ int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
       fprintf(stderr, "Error running the algorithm on the CPU\n");
       return -1;
     }
-
+    // Convert the time to milliseconds
     *time = (double)(time_diff.tv_sec * 1000 + time_diff.tv_nsec / 1000000.0);
     return 0;
   }
@@ -406,48 +408,52 @@ int main(int argc, char **argv) {
 
   // Generate heap-allocated data
   atoms_data atoms = atoms_data_init(particle_count, BOX_SIZE);
-  histogram hist_baseline = histogram_init(resolution, BOX_SIZE);
-  histogram hist_optimized = histogram_init(resolution, BOX_SIZE);
+  histogram hist_grid_2d = histogram_init(resolution, BOX_SIZE);
+  histogram hist_shared_mem = histogram_init(resolution, BOX_SIZE);
 
   // Run algorithms
-  float time_gpu_baseline, time_gpu_optimized;
-  if (calculate_and_display_histogram(&atoms, &hist_baseline, GPU,
-                                      &time_gpu_baseline, 1, block_size,
-                                      BASELINE) != 0) {
-    printf("Error running GPU baseline version. Exiting\n");
-    free(hist_baseline.arr);
-    free(hist_optimized.arr);
+  float time_gpu_grid_2d, time_gpu_shared_mem;
+  if (calculate_and_display_histogram(&atoms, &hist_grid_2d, GPU,
+                                      &time_gpu_grid_2d, 1, block_size,
+                                      GRID_2D) != 0) {
+    printf("Error running GPU 2D grid version. Exiting\n");
+    free(hist_grid_2d.arr);
+    free(hist_shared_mem.arr);
     free(atoms.x_pos);
     free(atoms.y_pos);
     free(atoms.z_pos);
     return 1;
   }
-  if (calculate_and_display_histogram(&atoms, &hist_optimized, GPU,
-                                      &time_gpu_optimized, 1, block_size,
-                                      OPTIMIZED) != 0) {
-    printf("Error running GPU optimized version. Exiting\n");
-    free(hist_baseline.arr);
-    free(hist_optimized.arr);
+  if (calculate_and_display_histogram(&atoms, &hist_shared_mem, GPU,
+                                      &time_gpu_shared_mem, 1, block_size,
+                                      SHARED_MEM) != 0) {
+    printf("Error running GPU shared memory version. Exiting\n");
+    free(hist_grid_2d.arr);
+    free(hist_shared_mem.arr);
     free(atoms.x_pos);
     free(atoms.y_pos);
     free(atoms.z_pos);
     return 1;
   }
 
+  printf("GPU 2D grid version histogram:\n");
+  display_histogram(&hist_grid_2d);
+  printf("GPU shared memory version histogram:\n");
+  display_histogram(&hist_shared_mem);
   // Calculate the difference histogram between the two histograms
-  for (int i = 0; i < hist_baseline.len; i++) {
-    hist_baseline.arr[i].d_cnt -= hist_optimized.arr[i].d_cnt;
+  for (int i = 0; i < hist_grid_2d.len; i++) {
+    hist_grid_2d.arr[i].d_cnt -= hist_shared_mem.arr[i].d_cnt;
   }
   // Display the difference histogram
   printf("Difference histogram:\n");
-  display_histogram(&hist_baseline);
+  display_histogram(&hist_grid_2d);
 
   // Display timing results
-  printf("GPU time in miliseconds (baseline): %f\n", time_gpu_baseline);
-  printf("GPU time in miliseconds (optimized): %f\n", time_gpu_optimized);
+  printf("GPU time in miliseconds (baseline): %f\n", time_gpu_grid_2d);
+  printf("GPU time in miliseconds (optimized): %f\n", time_gpu_shared_mem);
 
-  free(hist_baseline.arr);
-  free(hist_optimized.arr);
+  free(hist_grid_2d.arr);
+  free(hist_shared_mem.arr);
   free(atoms.x_pos);
   free(atoms.y_pos);
   free(atoms.z_pos);
