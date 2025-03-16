@@ -205,7 +205,7 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     printf("Running kernel using shared memory\n");
     int grid_size = (atoms_gpu->len + block_size - 1) / block_size;
     // We need to allocate enough space for the block size * 3 (x, y, z)
-    int shared_mem_size = 3 * block_size * sizeof(double);
+    size_t shared_mem_size = 3 * block_size * sizeof(double);
     if (shared_mem_size > deviceProp.sharedMemPerBlock) {
       fprintf(stderr,
               "Shared memory size is too large. Must be less than %zu\n",
@@ -214,7 +214,7 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     }
     printf("Grid size: %d\n", grid_size);
     printf("Block size: %d\n", block_size);
-    printf("Shared memory size: %d\n", shared_mem_size);
+    printf("Shared memory size: %zu\n", shared_mem_size);
 
     cudaEvent_t start_time, end_time;
     CHECK_CUDA_ERROR(cudaEventCreate(&start_time));
