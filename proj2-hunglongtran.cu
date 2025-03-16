@@ -103,8 +103,8 @@ __global__ void PDH_cuda_kernel_shared_mem(double *x_pos, double *y_pos,
     return;
   extern __shared__ double shared_data[]; // Single shared memory block
   double *x_shared = shared_data;
-  double *y_shared = &shared_data[blockDim.x];
-  double *z_shared = &shared_data[2 * blockDim.x];
+  double *y_shared = shared_data + blockDim.x;
+  double *z_shared = shared_data + 2 * blockDim.x;
 
   double x = x_pos[idx];
   double y = y_pos[idx];
@@ -131,6 +131,7 @@ __global__ void PDH_cuda_kernel_shared_mem(double *x_pos, double *y_pos,
         atomicAdd(&hist[h_pos].d_cnt, 1);
       }
     }
+    __syncthreads();
   }
 
   // Load the current block into shared memory
