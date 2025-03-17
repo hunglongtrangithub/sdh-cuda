@@ -78,9 +78,19 @@ __global__ void kernel_grid_2d(double *x_pos, double *y_pos, double *z_pos,
     return;
 
   // Calculate the distance between the two atoms
-  double dist = sqrt((x_pos[x] - x_pos[y]) * (x_pos[x] - x_pos[y]) +
-                     (y_pos[x] - y_pos[y]) * (y_pos[x] - y_pos[y]) +
-                     (z_pos[x] - z_pos[y]) * (z_pos[x] - z_pos[y]));
+  double x1 = x_pos[x];
+  double y1 = y_pos[x];
+  double z1 = z_pos[x];
+
+  double x2 = x_pos[y];
+  double y2 = y_pos[y];
+  double z2 = z_pos[y];
+
+  double dx = x1 - x2;
+  double dy = y1 - y2;
+  double dz = z1 - z2;
+
+  double dist = sqrt(dx * dx + dy * dy + dz * dz);
 
   // Calculate the histogram position
   int h_pos = (int)(dist / resolution);
