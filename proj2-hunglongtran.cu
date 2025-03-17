@@ -67,11 +67,9 @@ int PDH_baseline(atoms_data *atoms, histogram *hist) {
 }
 
 /* CUDA PDH kernel */
-__global__ void PDH_cuda_kernel_grid_2d(double *x_pos, double *y_pos,
-                                        double *z_pos,
-                                        unsigned long long atoms_len,
-                                        bucket *hist, unsigned int hist_len,
-                                        double resolution) {
+__global__ void kernel_grid_2d(double *x_pos, double *y_pos, double *z_pos,
+                               unsigned long long atoms_len, bucket *hist,
+                               unsigned int hist_len, double resolution) {
   int x = blockDim.x * blockIdx.x + threadIdx.x;
   int y = blockDim.y * blockIdx.y + threadIdx.y;
 
@@ -93,11 +91,9 @@ __global__ void PDH_cuda_kernel_grid_2d(double *x_pos, double *y_pos,
   atomicAdd(&hist[h_pos].d_cnt, 1);
 }
 
-__global__ void PDH_cuda_kernel_shared_mem(double *x_pos, double *y_pos,
-                                           double *z_pos,
-                                           unsigned long long atoms_len,
-                                           bucket *hist, unsigned int hist_len,
-                                           double resolution) {
+__global__ void kernel_shared_mem(double *x_pos, double *y_pos, double *z_pos,
+                                  unsigned long long atoms_len, bucket *hist,
+                                  unsigned int hist_len, double resolution) {
   int idx = blockDim.x * blockIdx.x + threadIdx.x;
   if (idx >= atoms_len)
     return;
@@ -190,7 +186,7 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     CHECK_CUDA_ERROR(cudaEventRecord(start_time, 0));
 
     // Launch the kernel
-    PDH_cuda_kernel_grid_2d<<<grid_dim, block_dim>>>(
+    kernel_grid_2d<<<grid_dim, block_dim>>>(
         atoms_gpu->x_pos, atoms_gpu->y_pos, atoms_gpu->z_pos, atoms_gpu->len,
         hist_gpu->arr, hist_gpu->len, hist_gpu->resolution);
     CHECK_CUDA_ERROR(cudaPeekAtLastError());
@@ -223,7 +219,7 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     CHECK_CUDA_ERROR(cudaEventRecord(start_time, 0));
 
     // Launch the kernel
-    PDH_cuda_kernel_shared_mem<<<grid_size, block_size, shared_mem_size>>>(
+    kernel_shared_mem<<<grid_size, block_size, shared_mem_size>>>(
         atoms_gpu->x_pos, atoms_gpu->y_pos, atoms_gpu->z_pos, atoms_gpu->len,
         hist_gpu->arr, hist_gpu->len, hist_gpu->resolution);
     CHECK_CUDA_ERROR(cudaPeekAtLastError());
