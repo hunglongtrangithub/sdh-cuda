@@ -443,13 +443,15 @@ int main(int argc, char **argv) {
   atoms_data atoms = atoms_data_init(particle_count, BOX_SIZE);
   histogram hist_grid_2d = histogram_init(resolution, BOX_SIZE);
   histogram hist_shared_mem = histogram_init(resolution, BOX_SIZE);
+  histogram hist_cpu = histogram_init(resolution, BOX_SIZE);
 
   // Run algorithms
-  float time_gpu_grid_2d, time_gpu_shared_mem;
+  float time_gpu_grid_2d, time_gpu_shared_mem, time_cpu;
   if (calculate_and_display_histogram(&atoms, &hist_grid_2d, GPU,
                                       &time_gpu_grid_2d, 2, block_size,
                                       GRID_2D) != 0) {
     printf("Error running GPU 2D grid (baseline) version. Exiting\n");
+    free(hist_cpu.arr);
     free(hist_grid_2d.arr);
     free(hist_shared_mem.arr);
     free(atoms.x_pos);
@@ -461,6 +463,7 @@ int main(int argc, char **argv) {
                                       &time_gpu_shared_mem, 2, block_size,
                                       SHARED_MEM) != 0) {
     printf("Error running GPU shared memory version. Exiting\n");
+    free(hist_cpu.arr);
     free(hist_grid_2d.arr);
     free(hist_shared_mem.arr);
     free(atoms.x_pos);
@@ -485,6 +488,24 @@ int main(int argc, char **argv) {
   printf("GPU time in miliseconds (2D grid): %f\n", time_gpu_grid_2d);
   printf("GPU time in miliseconds (shared memory): %f\n", time_gpu_shared_mem);
 
+  if (calculate_and_display_histogram(&atoms, &hist_cpu, CPU, &time_cpu, 0) !=
+      0) {
+    printf("Error running CPU version. Exiting\n");
+    free(hist_cpu.arr);
+    free(hist_grid_2d.arr);
+    free(hist_shared_mem.arr);
+    free(atoms.x_pos);
+    free(atoms.y_pos);
+    free(atoms.z_pos);
+    return 1;
+  }
+
+  // Calculate speedup
+  printf("CPU time in miliseconds: %f\n", time_cpu);
+  printf("Speedup (GPU 2D grid): %f\n", time_cpu / time_gpu_grid_2d);
+  printf("Speedup (GPU shared memory): %f\n", time_cpu / time_gpu_shared_mem);
+
+  free(hist_cpu.arr);
   free(hist_grid_2d.arr);
   free(hist_shared_mem.arr);
   free(atoms.x_pos);
