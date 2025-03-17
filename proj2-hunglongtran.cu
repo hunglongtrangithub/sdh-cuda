@@ -66,7 +66,12 @@ int PDH_baseline(atoms_data *atoms, histogram *hist) {
   return 0;
 }
 
-/* CUDA PDH kernel */
+/*
+ * Kernel function to calculate the histogram using a 2D grid
+ * Optimization techniques:
+ * 1. Embarrassingly parallel
+ * 2. Use registers to store the coordinates of the atoms for faster access
+ */
 __global__ void kernel_grid_2d(double *x_pos, double *y_pos, double *z_pos,
                                unsigned long long atoms_len, bucket *hist,
                                unsigned int hist_len, double resolution) {
@@ -101,6 +106,12 @@ __global__ void kernel_grid_2d(double *x_pos, double *y_pos, double *z_pos,
   atomicAdd(&hist[h_pos].d_cnt, 1);
 }
 
+/*
+ * Kernel function to calculate the histogram using shared memory
+ * Optimization techniques:
+ * 1. Use structure of arrays (SoA) instead of array of structures (AoS)
+ * 2. Use shared memory to cache the data of blocks
+ */
 __global__ void kernel_shared_mem(double *x_pos, double *y_pos, double *z_pos,
                                   unsigned long long atoms_len, bucket *hist,
                                   unsigned int hist_len, double resolution) {
