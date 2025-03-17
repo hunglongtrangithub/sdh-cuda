@@ -276,6 +276,18 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     CHECK_CUDA_ERROR(cudaPeekAtLastError());
     CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
+    // Move hist_2d to host and print
+    bucket *hist_2d_host =
+        (bucket *)malloc(hist_gpu->len * grid_size * sizeof(bucket));
+    CHECK_CUDA_ERROR(cudaMemcpy(hist_2d_host, hist_2d,
+                                sizeof(bucket) * hist_gpu->len * grid_size,
+                                cudaMemcpyDeviceToHost));
+    for (int i = 0; i < hist_gpu->len; i++) {
+      for (int j = 0; j < grid_size; j++) {
+        printf("%llu ", hist_2d_host[i * grid_size + j].d_cnt);
+      }
+      printf("\n");
+    }
     // Launch the reduction kernel
     printf("Launching reduction kernel\n");
     if (grid_size > deviceProp.maxThreadsPerBlock) {
@@ -290,6 +302,11 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
               deviceProp.sharedMemPerBlock);
       return -1;
     }
+    printf("Reduction grid size: %d\n", hist_gpu->len);
+    printf("Reduction block size: %d\n", grid_size);
+    printf("Reduction shared memory size: %u\n", reduction_shared_mem_size);
+
+    // Launch the reduction kernel
     kernel_reduction<<<hist_gpu->len, grid_size, reduction_shared_mem_size>>>(
         hist_2d, hist_gpu->arr);
     CHECK_CUDA_ERROR(cudaPeekAtLastError());
