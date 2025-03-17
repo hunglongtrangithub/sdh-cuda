@@ -120,8 +120,8 @@ __global__ void kernel_shared_mem(double *x_pos, double *y_pos, double *z_pos,
   double *z_shared = shared_data + 2 * blockDim.x;
   bucket *hist_shared = (bucket *)(shared_data + 3 * blockDim.x);
   // Initialize the shared histogram to 0
-  for (int i = threadIdx.x; i < hist_len; i += blockDim.x) {
-    hist_shared[i].d_cnt = 0;
+  for (int bin = threadIdx.x; bin < hist_len; bin += blockDim.x) {
+    hist_shared[bin].d_cnt = 0;
   }
   __syncthreads();
 
@@ -130,18 +130,19 @@ __global__ void kernel_shared_mem(double *x_pos, double *y_pos, double *z_pos,
   double z = z_pos[idx];
 
   // Loop through each next block from the current block
-  for (int i = blockIdx.x + 1; i < gridDim.x; i++) {
+  for (int block_id = blockIdx.x + 1; block_id < gridDim.x; block_id++) {
     // Load the block into shared memory
-    int i_global = blockDim.x * i + threadIdx.x;
-    if (i_global < atoms_len) {
-      x_shared[threadIdx.x] = x_pos[i_global];
-      y_shared[threadIdx.x] = y_pos[i_global];
-      z_shared[threadIdx.x] = z_pos[i_global];
+    int i = blockDim.x * block_id + threadIdx.x;
+    if (i < atoms_len) {
+      x_shared[threadIdx.x] = x_pos[i];
+      y_shared[threadIdx.x] = y_pos[i];
+      z_shared[threadIdx.x] = z_pos[i];
     }
     __syncthreads();
 
     // Loop through each atom in the cached block
-    for (int j = 0; j < min(blockDim.x, atoms_len - i * blockDim.x); j++) {
+    for (int j = 0; j < min(blockDim.x, atoms_len - block_id * blockDim.x);
+         j++) {
       double dist = sqrt((x - x_shared[j]) * (x - x_shared[j]) +
                          (y - y_shared[j]) * (y - y_shared[j]) +
                          (z - z_shared[j]) * (z - z_shared[j]));
