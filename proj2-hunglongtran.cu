@@ -92,7 +92,7 @@ __global__ void kernel_grid_2d(double *x_pos, double *y_pos, double *z_pos,
 }
 
 __global__ void kernel_shared_mem(double *x_pos, double *y_pos, double *z_pos,
-                                  unsigned long long atoms_len, bucket *hist,
+                                  unsigned long long atoms_len, bucket *hist_2d,
                                   unsigned int hist_len, double resolution) {
   int idx = blockDim.x * blockIdx.x + threadIdx.x;
   if (idx >= atoms_len)
@@ -101,6 +101,7 @@ __global__ void kernel_shared_mem(double *x_pos, double *y_pos, double *z_pos,
   double *x_shared = shared_data;
   double *y_shared = shared_data + blockDim.x;
   double *z_shared = shared_data + 2 * blockDim.x;
+  bucket *hist_shared = (bucket *)(shared_data + 3 * blockDim.x);
 
   double x = x_pos[idx];
   double y = y_pos[idx];
@@ -124,7 +125,7 @@ __global__ void kernel_shared_mem(double *x_pos, double *y_pos, double *z_pos,
                          (z - z_shared[j]) * (z - z_shared[j]));
       int h_pos = (int)(dist / resolution);
       if (h_pos < hist_len) {
-        atomicAdd(&hist[h_pos].d_cnt, 1);
+        atomicAdd(&hist_shared[h_pos].d_cnt, 1);
       }
     }
     __syncthreads();
@@ -146,8 +147,33 @@ __global__ void kernel_shared_mem(double *x_pos, double *y_pos, double *z_pos,
                        (z - z_shared[i]) * (z - z_shared[i]));
     int h_pos = (int)(dist / resolution);
     if (h_pos < hist_len) {
-      atomicAdd(&hist[h_pos].d_cnt, 1);
+      atomicAdd(&hist_shared[h_pos].d_cnt, 1);
     }
+  }
+
+  // Write the shared histogram to global memory
+  if (threadIdx.x == 0) {
+    for (int i = 0; i < hist_len; i++) {
+      hist_2d[i * gridDim.x + blockIdx.x].d_cnt = hist_shared[i].d_cnt;
+    }
+  }
+}
+
+__global__ void kernel_reduction(bucket *hist_2d, bucket *hist) {
+  // Load to shared memory
+  extern __shared__ bucket shared_mem[];
+  shared_mem[threadIdx.x] = hist_2d[blockIdx.x * blockDim.x + threadIdx.x];
+  __syncthreads();
+  // Reduce
+  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride) {
+      shared_mem[threadIdx.x].d_cnt += shared_mem[threadIdx.x + stride].d_cnt;
+    }
+    __syncthreads();
+  }
+  // Write to global memory
+  if (threadIdx.x == 0) {
+    hist[blockIdx.x].d_cnt = shared_mem[0].d_cnt;
   }
 }
 
@@ -163,15 +189,15 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
   }
   cudaDeviceProp deviceProp;
   CHECK_CUDA_ERROR(cudaGetDeviceProperties(&deviceProp, 0));
+  if (block_size > deviceProp.maxThreadsPerBlock) {
+    fprintf(stderr, "Block size is too large. Must be less than %d\n",
+            deviceProp.maxThreadsPerBlock);
+    return -1;
+  }
 
   switch (algorithm) {
   case GRID_2D: {
     printf("Running baseline kernel using 2D grid\n");
-    if (block_size > deviceProp.maxThreadsPerBlock) {
-      fprintf(stderr, "Block size is too large. Must be less than %d\n",
-              deviceProp.maxThreadsPerBlock);
-      return -1;
-    }
 
     // Define the number of blocks and threads per block
     dim3 block_dim(sqrt(block_size), sqrt(block_size));
@@ -191,8 +217,10 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
         hist_gpu->arr, hist_gpu->len, hist_gpu->resolution);
     CHECK_CUDA_ERROR(cudaPeekAtLastError());
     CHECK_CUDA_ERROR(cudaDeviceSynchronize());
+
     CHECK_CUDA_ERROR(cudaEventRecord(end_time, 0));
     CHECK_CUDA_ERROR(cudaEventSynchronize(end_time));
+
     CHECK_CUDA_ERROR(cudaEventElapsedTime(diff, start_time, end_time));
     CHECK_CUDA_ERROR(cudaEventDestroy(start_time));
     CHECK_CUDA_ERROR(cudaEventDestroy(end_time));
@@ -200,9 +228,14 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
   }
   case SHARED_MEM: {
     printf("Running kernel using shared memory\n");
+
+    // Launch the kernel
+    printf("Launching shared memory kernel\n");
     int grid_size = (atoms_gpu->len + block_size - 1) / block_size;
-    // We need to allocate enough space for the block size * 3 (x, y, z)
-    size_t shared_mem_size = 3 * block_size * sizeof(double);
+    // We need to allocate enough space for the block size * 3 (x, y, z) and
+    // histogram
+    size_t shared_mem_size =
+        3 * block_size * sizeof(double) + hist_gpu->len * sizeof(bucket);
     if (shared_mem_size > deviceProp.sharedMemPerBlock) {
       fprintf(stderr,
               "Shared memory size is too large. Must be less than %zu\n",
@@ -213,19 +246,45 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     printf("Block size: %d\n", block_size);
     printf("Shared memory size: %zu\n", shared_mem_size);
 
+    // Define the histogram 2D grid for all blocks
+    bucket *hist_2d;
+    CHECK_CUDA_ERROR(
+        cudaMalloc(&hist_2d, hist_gpu->len * grid_size * sizeof(bucket)));
+
     cudaEvent_t start_time, end_time;
     CHECK_CUDA_ERROR(cudaEventCreate(&start_time));
     CHECK_CUDA_ERROR(cudaEventCreate(&end_time));
     CHECK_CUDA_ERROR(cudaEventRecord(start_time, 0));
 
-    // Launch the kernel
     kernel_shared_mem<<<grid_size, block_size, shared_mem_size>>>(
         atoms_gpu->x_pos, atoms_gpu->y_pos, atoms_gpu->z_pos, atoms_gpu->len,
-        hist_gpu->arr, hist_gpu->len, hist_gpu->resolution);
+        hist_2d, hist_gpu->len, hist_gpu->resolution);
     CHECK_CUDA_ERROR(cudaPeekAtLastError());
     CHECK_CUDA_ERROR(cudaDeviceSynchronize());
+
+    // Launch the reduction kernel
+    printf("Launching reduction kernel\n");
+    if (grid_size > deviceProp.maxThreadsPerBlock) {
+      fprintf(stderr, "Block size is too large. Must be less than %d\n",
+              deviceProp.maxThreadsPerBlock);
+      return -1;
+    }
+    shared_mem_size = grid_size * sizeof(bucket);
+    if (shared_mem_size > deviceProp.sharedMemPerBlock) {
+      fprintf(stderr,
+              "Shared memory size is too large. Must be less than %zu\n",
+              deviceProp.sharedMemPerBlock);
+      return -1;
+    }
+
+    kernel_reduction<<<hist_gpu->len, grid_size, shared_mem_size>>>(
+        hist_2d, hist_gpu->arr);
+    CHECK_CUDA_ERROR(cudaPeekAtLastError());
+    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
+
     CHECK_CUDA_ERROR(cudaEventRecord(end_time, 0));
     CHECK_CUDA_ERROR(cudaEventSynchronize(end_time));
+
     CHECK_CUDA_ERROR(cudaEventElapsedTime(diff, start_time, end_time));
     CHECK_CUDA_ERROR(cudaEventDestroy(start_time));
     CHECK_CUDA_ERROR(cudaEventDestroy(end_time));
@@ -443,6 +502,7 @@ int main(int argc, char **argv) {
   atoms_data atoms = atoms_data_init(particle_count, BOX_SIZE);
   histogram hist_grid_2d = histogram_init(resolution, BOX_SIZE);
   histogram hist_shared_mem = histogram_init(resolution, BOX_SIZE);
+  // histogram hist_cpu = histogram_init(resolution, BOX_SIZE);
 
   // Run algorithms
   float time_gpu_grid_2d, time_gpu_shared_mem;
@@ -484,6 +544,22 @@ int main(int argc, char **argv) {
   // Display timing results
   printf("GPU time in miliseconds (2D grid): %f\n", time_gpu_grid_2d);
   printf("GPU time in miliseconds (shared memory): %f\n", time_gpu_shared_mem);
+
+  // if (calculate_and_display_histogram(&atoms, &hist_cpu, CPU, &time_cpu, 0)
+  // !=
+  //     0) {
+  //   printf("Error running CPU version. Exiting\n");
+  //   free(hist_grid_2d.arr);
+  //   free(hist_shared_mem.arr);
+  //   free(atoms.x_pos);
+  //   free(atoms.y_pos);
+  //   free(atoms.z_pos);
+  //   return 1;
+  // }
+  //
+  // printf("Speedup (GPU 2D grid vs CPU): %f\n", time_cpu / time_gpu_grid_2d);
+  // printf("Speedup (GPU shared memory vs CPU): %f\n",
+  //        time_cpu / time_gpu_shared_mem);
 
   free(hist_grid_2d.arr);
   free(hist_shared_mem.arr);
