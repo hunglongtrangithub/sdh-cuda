@@ -155,11 +155,9 @@ __global__ void kernel_shared_mem(double *x_pos, double *y_pos, double *z_pos,
   }
 
   // Load the current block into shared memory
-  if (idx < atoms_len) {
-    x_shared[threadIdx.x] = x;
-    y_shared[threadIdx.x] = y;
-    z_shared[threadIdx.x] = z;
-  }
+  x_shared[threadIdx.x] = x;
+  y_shared[threadIdx.x] = y;
+  z_shared[threadIdx.x] = z;
   __syncthreads();
 
   // Loop through each atom in the current block
