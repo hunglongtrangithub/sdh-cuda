@@ -78,10 +78,19 @@ __global__ void kernel_grid_2d(double *x_pos, double *y_pos, double *z_pos,
     return;
 
   // Calculate the distance between the two atoms
-  double dist = sqrt((x_pos[x] - x_pos[y]) * (x_pos[x] - x_pos[y]) +
-                     (y_pos[x] - y_pos[y]) * (y_pos[x] - y_pos[y]) +
-                     (z_pos[x] - z_pos[y]) * (z_pos[x] - z_pos[y]));
+  double x1 = x_pos[x];
+  double y1 = y_pos[x];
+  double z1 = z_pos[x];
 
+  double x2 = x_pos[y];
+  double y2 = y_pos[y];
+  double z2 = z_pos[y];
+
+  double dx = x1 - x2;
+  double dy = y1 - y2;
+  double dz = z1 - z2;
+
+  double dist = sqrt(dx * dx + dy * dy + dz * dz);
   // Calculate the histogram position
   int h_pos = (int)(dist / resolution);
   if (h_pos >= hist_len)
@@ -155,12 +164,11 @@ __global__ void kernel_shared_mem(double *x_pos, double *y_pos, double *z_pos,
       atomicAdd(&hist_shared[h_pos].d_cnt, 1);
     }
   }
+  __syncthreads();
 
   // Write the shared histogram to global memory
-  if (threadIdx.x == 0) {
-    for (int i = 0; i < hist_len; i++) {
-      hist_2d[i * gridDim.x + blockIdx.x].d_cnt = hist_shared[i].d_cnt;
-    }
+  for (int i = threadIdx.x; i < hist_len; i += blockDim.x) {
+    hist_2d[i * gridDim.x + blockIdx.x].d_cnt = hist_shared[i].d_cnt;
   }
 }
 
@@ -171,11 +179,8 @@ __global__ void kernel_reduction(bucket *hist_2d, bucket *hist) {
   __syncthreads();
   // Reduce
   for (int stride = (blockDim.x + 1) / 2; stride > 0; stride >>= 1) {
-    if (threadIdx.x < stride) {
-      shared_mem[threadIdx.x].d_cnt +=
-          threadIdx.x + stride > blockDim.x
-              ? 0
-              : shared_mem[threadIdx.x + stride].d_cnt;
+    if (threadIdx.x < stride && threadIdx.x + stride < blockDim.x) {
+      shared_mem[threadIdx.x].d_cnt += shared_mem[threadIdx.x + stride].d_cnt;
     }
     __syncthreads();
   }
@@ -592,8 +597,8 @@ int main(int argc, char **argv) {
   //   return 1;
   // }
   //
-  // printf("Speedup (GPU 2D grid vs CPU): %f\n", time_cpu / time_gpu_grid_2d);
-  // printf("Speedup (GPU shared memory vs CPU): %f\n",
+  // printf("Speedup (GPU 2D grid vs CPU): %f\n", time_cpu /
+  // time_gpu_grid_2d); printf("Speedup (GPU shared memory vs CPU): %f\n",
   //        time_cpu / time_gpu_shared_mem);
 
   free(hist_grid_2d.arr);
