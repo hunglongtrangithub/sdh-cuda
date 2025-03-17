@@ -27,7 +27,7 @@ typedef struct atomdesc {
   double z_pos;
 } atom;
 
-typedef struct hist_entry {
+typedef struct __align__(8) hist_entry {
   unsigned long long d_cnt;
 } bucket;
 
@@ -51,12 +51,19 @@ int PDH_baseline(atoms_data *atoms, histogram *hist) {
 
   for (i = 0; i < atoms->len; i++) {
     for (j = i + 1; j < atoms->len; j++) {
-      dist = sqrt((atoms->x_pos[i] - atoms->x_pos[j]) *
-                      (atoms->x_pos[i] - atoms->x_pos[j]) +
-                  (atoms->y_pos[i] - atoms->y_pos[j]) *
-                      (atoms->y_pos[i] - atoms->y_pos[j]) +
-                  (atoms->z_pos[i] - atoms->z_pos[j]) *
-                      (atoms->z_pos[i] - atoms->z_pos[j]));
+      double x1 = atoms->x_pos[i];
+      double y1 = atoms->y_pos[i];
+      double z1 = atoms->z_pos[i];
+
+      double x2 = atoms->x_pos[j];
+      double y2 = atoms->y_pos[j];
+      double z2 = atoms->z_pos[j];
+
+      double dx = x1 - x2;
+      double dy = y1 - y2;
+      double dz = z1 - z2;
+
+      dist = sqrt(dx * dx + dy * dy + dz * dz);
       int h_pos = (int)(dist / hist->resolution);
       if (h_pos >= hist->len)
         continue;
@@ -183,7 +190,7 @@ __global__ void kernel_reduction(bucket *hist_2d, int hist_2d_width,
           : 0;
   __syncthreads();
   // Reduce
-  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+  for (unsigned int stride = blockDim.x / 2; stride > 0; stride /= 2) {
     if (threadIdx.x < stride) {
       shared_mem[threadIdx.x].d_cnt += shared_mem[threadIdx.x + stride].d_cnt;
     }
@@ -300,6 +307,7 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     //   printf("\n");
     // }
     // free(hist_2d_host);
+
     // Launch the reduction kernel
     printf("Launching reduction kernel\n");
 
@@ -556,16 +564,17 @@ int main(int argc, char **argv) {
   atoms_data atoms = atoms_data_init(particle_count, BOX_SIZE);
   histogram hist_grid_2d = histogram_init(resolution, BOX_SIZE);
   histogram hist_shared_mem = histogram_init(resolution, BOX_SIZE);
-  // histogram hist_cpu = histogram_init(resolution, BOX_SIZE);
+  histogram hist_cpu = histogram_init(resolution, BOX_SIZE);
 
   // Run algorithms
-  float time_gpu_grid_2d, time_gpu_shared_mem;
+  float time_gpu_grid_2d, time_gpu_shared_mem, time_cpu;
   if (calculate_and_display_histogram(&atoms, &hist_grid_2d, GPU,
                                       &time_gpu_grid_2d, 2, block_size,
                                       GRID_2D) != 0) {
     printf("Error running GPU 2D grid (baseline) version. Exiting\n");
     free(hist_grid_2d.arr);
     free(hist_shared_mem.arr);
+    free(hist_cpu.arr);
     free(atoms.x_pos);
     free(atoms.y_pos);
     free(atoms.z_pos);
@@ -577,6 +586,7 @@ int main(int argc, char **argv) {
     printf("Error running GPU shared memory version. Exiting\n");
     free(hist_grid_2d.arr);
     free(hist_shared_mem.arr);
+    free(hist_cpu.arr);
     free(atoms.x_pos);
     free(atoms.y_pos);
     free(atoms.z_pos);
@@ -587,36 +597,44 @@ int main(int argc, char **argv) {
   display_histogram(&hist_grid_2d);
   printf("GPU shared memory version histogram:\n");
   display_histogram(&hist_shared_mem);
-  // Calculate the difference histogram between the two histograms
-  for (int i = 0; i < hist_grid_2d.len; i++) {
-    hist_grid_2d.arr[i].d_cnt -= hist_shared_mem.arr[i].d_cnt;
-  }
-  // Display the difference histogram
-  printf("Difference histogram:\n");
-  display_histogram(&hist_grid_2d);
 
   // Display timing results
   printf("GPU time in miliseconds (2D grid): %f\n", time_gpu_grid_2d);
   printf("GPU time in miliseconds (shared memory): %f\n", time_gpu_shared_mem);
 
-  // if (calculate_and_display_histogram(&atoms, &hist_cpu, CPU, &time_cpu, 0)
-  // !=
-  //     0) {
-  //   printf("Error running CPU version. Exiting\n");
-  //   free(hist_grid_2d.arr);
-  //   free(hist_shared_mem.arr);
-  //   free(atoms.x_pos);
-  //   free(atoms.y_pos);
-  //   free(atoms.z_pos);
-  //   return 1;
-  // }
-  //
-  // printf("Speedup (GPU 2D grid vs CPU): %f\n", time_cpu /
-  // time_gpu_grid_2d); printf("Speedup (GPU shared memory vs CPU): %f\n",
-  //        time_cpu / time_gpu_shared_mem);
+  if (calculate_and_display_histogram(&atoms, &hist_cpu, CPU, &time_cpu, 0) !=
+      0) {
+    printf("Error running CPU version. Exiting\n");
+    free(hist_grid_2d.arr);
+    free(hist_shared_mem.arr);
+    free(hist_cpu.arr);
+    free(atoms.x_pos);
+    free(atoms.y_pos);
+    free(atoms.z_pos);
+    return 1;
+  }
+  printf("CPU version histogram:\n");
+  display_histogram(&hist_cpu);
+
+  // Calculate the diff between each GPU histogram and the CPU histogram
+  for (int i = 0; i < hist_cpu.len; i++) {
+    hist_grid_2d.arr[i].d_cnt -= hist_cpu.arr[i].d_cnt;
+    hist_shared_mem.arr[i].d_cnt -= hist_cpu.arr[i].d_cnt;
+  }
+  // Display the diff
+  printf("GPU 2D grid (baseline) version histogram diff:\n");
+  display_histogram(&hist_grid_2d);
+  printf("GPU shared memory version histogram diff:\n");
+  display_histogram(&hist_shared_mem);
+
+  // Display timing results
+  printf("Speedup (GPU 2D grid vs CPU): %f\n", time_cpu / time_gpu_grid_2d);
+  printf("Speedup (GPU shared memory vs CPU): %f\n",
+         time_cpu / time_gpu_shared_mem);
 
   free(hist_grid_2d.arr);
   free(hist_shared_mem.arr);
+  free(hist_cpu.arr);
   free(atoms.x_pos);
   free(atoms.y_pos);
   free(atoms.z_pos);
