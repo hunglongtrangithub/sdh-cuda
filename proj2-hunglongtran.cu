@@ -102,6 +102,11 @@ __global__ void kernel_shared_mem(double *x_pos, double *y_pos, double *z_pos,
   double *y_shared = shared_data + blockDim.x;
   double *z_shared = shared_data + 2 * blockDim.x;
   bucket *hist_shared = (bucket *)(shared_data + 3 * blockDim.x);
+  // Initialize the shared histogram to 0
+  for (int i = threadIdx.x; i < hist_len; i += blockDim.x) {
+    hist_shared[i].d_cnt = 0;
+  }
+  __syncthreads();
 
   double x = x_pos[idx];
   double y = y_pos[idx];
@@ -165,9 +170,12 @@ __global__ void kernel_reduction(bucket *hist_2d, bucket *hist) {
   shared_mem[threadIdx.x] = hist_2d[blockIdx.x * blockDim.x + threadIdx.x];
   __syncthreads();
   // Reduce
-  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+  for (int stride = (blockDim.x + 1) / 2; stride > 0; stride >>= 1) {
     if (threadIdx.x < stride) {
-      shared_mem[threadIdx.x].d_cnt += shared_mem[threadIdx.x + stride].d_cnt;
+      shared_mem[threadIdx.x].d_cnt +=
+          threadIdx.x + stride > blockDim.x
+              ? 0
+              : shared_mem[threadIdx.x + stride].d_cnt;
     }
     __syncthreads();
   }
@@ -209,6 +217,8 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     cudaEvent_t start_time, end_time;
     CHECK_CUDA_ERROR(cudaEventCreate(&start_time));
     CHECK_CUDA_ERROR(cudaEventCreate(&end_time));
+
+    // Start the timer
     CHECK_CUDA_ERROR(cudaEventRecord(start_time, 0));
 
     // Launch the kernel
@@ -218,9 +228,11 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     CHECK_CUDA_ERROR(cudaPeekAtLastError());
     CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
+    // Stop the timer
     CHECK_CUDA_ERROR(cudaEventRecord(end_time, 0));
     CHECK_CUDA_ERROR(cudaEventSynchronize(end_time));
 
+    // Calculate the elapsed time
     CHECK_CUDA_ERROR(cudaEventElapsedTime(diff, start_time, end_time));
     CHECK_CUDA_ERROR(cudaEventDestroy(start_time));
     CHECK_CUDA_ERROR(cudaEventDestroy(end_time));
@@ -254,6 +266,8 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     cudaEvent_t start_time, end_time;
     CHECK_CUDA_ERROR(cudaEventCreate(&start_time));
     CHECK_CUDA_ERROR(cudaEventCreate(&end_time));
+
+    // Start the timer
     CHECK_CUDA_ERROR(cudaEventRecord(start_time, 0));
 
     kernel_shared_mem<<<grid_size, block_size, shared_mem_size>>>(
@@ -269,22 +283,26 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
               deviceProp.maxThreadsPerBlock);
       return -1;
     }
-    shared_mem_size = grid_size * sizeof(bucket);
-    if (shared_mem_size > deviceProp.sharedMemPerBlock) {
+    unsigned int reduction_shared_mem_size = grid_size * sizeof(bucket);
+    if (reduction_shared_mem_size > deviceProp.sharedMemPerBlock) {
       fprintf(stderr,
               "Shared memory size is too large. Must be less than %zu\n",
               deviceProp.sharedMemPerBlock);
       return -1;
     }
-
-    kernel_reduction<<<hist_gpu->len, grid_size, shared_mem_size>>>(
+    kernel_reduction<<<hist_gpu->len, grid_size, reduction_shared_mem_size>>>(
         hist_2d, hist_gpu->arr);
     CHECK_CUDA_ERROR(cudaPeekAtLastError());
     CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
+    // Stop the timer
     CHECK_CUDA_ERROR(cudaEventRecord(end_time, 0));
     CHECK_CUDA_ERROR(cudaEventSynchronize(end_time));
 
+    // Free the histogram 2D grid
+    CHECK_CUDA_ERROR(cudaFree(hist_2d));
+
+    // Calculate the elapsed time
     CHECK_CUDA_ERROR(cudaEventElapsedTime(diff, start_time, end_time));
     CHECK_CUDA_ERROR(cudaEventDestroy(start_time));
     CHECK_CUDA_ERROR(cudaEventDestroy(end_time));
