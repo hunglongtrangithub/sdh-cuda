@@ -177,9 +177,10 @@ __global__ void kernel_reduction(bucket *hist_2d, int hist_2d_width,
                                  bucket *hist) {
   // Load to shared memory
   extern __shared__ bucket shared_mem[];
-  shared_mem[threadIdx.x] = threadIdx.x < hist_2d_width
-                                ? hist_2d[blockIdx.x * blockDim.x + threadIdx.x]
-                                : (bucket){0};
+  shared_mem[threadIdx.x].d_cnt =
+      threadIdx.x < hist_2d_width
+          ? hist_2d[blockIdx.x * hist_2d_width + threadIdx.x].d_cnt
+          : 0;
   __syncthreads();
   // Reduce
   for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
@@ -285,6 +286,20 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     CHECK_CUDA_ERROR(cudaPeekAtLastError());
     CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
+    // // print the histogram 2D grid
+    // bucket *hist_2d_host =
+    //     (bucket *)malloc(hist_gpu->len * grid_size * sizeof(bucket));
+    // CHECK_CUDA_ERROR(cudaMemcpy(hist_2d_host, hist_2d,
+    //                             hist_gpu->len * grid_size * sizeof(bucket),
+    //                             cudaMemcpyDeviceToHost));
+    // printf("Histogram 2D grid:\n");
+    // for (int i = 0; i < hist_gpu->len; i++) {
+    //   for (int j = 0; j < grid_size; j++) {
+    //     printf("%lld ", hist_2d_host[i * grid_size + j].d_cnt);
+    //   }
+    //   printf("\n");
+    // }
+    // free(hist_2d_host);
     // Launch the reduction kernel
     printf("Launching reduction kernel\n");
 
