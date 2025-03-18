@@ -19,7 +19,7 @@
 #define min(a, b) ((a) < (b) ? (a) : (b))
 enum platform { CPU, GPU };
 
-enum kernel_algorithm { GRID_2D, SHARED_MEM };
+enum kernel_algorithm { GRID_2D, SHARED_MEM_WITH_PRIVATIZATION, SHARED_MEM };
 
 typedef struct atomdesc {
   double x_pos;
@@ -27,7 +27,7 @@ typedef struct atomdesc {
   double z_pos;
 } atom;
 
-typedef struct __align__(8) hist_entry {
+typedef struct hist_entry {
   unsigned long long d_cnt;
 } bucket;
 
@@ -109,7 +109,7 @@ __global__ void kernel_grid_2d(double *x_pos, double *y_pos, double *z_pos,
 }
 
 __global__ void kernel_shared_mem(double *x_pos, double *y_pos, double *z_pos,
-                                  unsigned long long atoms_len, bucket *hist_2d,
+                                  unsigned long long atoms_len, bucket *hist,
                                   unsigned int hist_len, double resolution) {
   int idx = blockDim.x * blockIdx.x + threadIdx.x;
   if (idx >= atoms_len)
@@ -118,7 +118,67 @@ __global__ void kernel_shared_mem(double *x_pos, double *y_pos, double *z_pos,
   double *x_shared = shared_data;
   double *y_shared = shared_data + blockDim.x;
   double *z_shared = shared_data + 2 * blockDim.x;
+
+  double x = x_pos[idx];
+  double y = y_pos[idx];
+  double z = z_pos[idx];
+
+  // Loop through each next block from the current block
+  for (int block_id = blockIdx.x + 1; block_id < gridDim.x; block_id++) {
+    // Load the block into shared memory
+    int i = blockDim.x * block_id + threadIdx.x;
+    if (i < atoms_len) {
+      x_shared[threadIdx.x] = x_pos[i];
+      y_shared[threadIdx.x] = y_pos[i];
+      z_shared[threadIdx.x] = z_pos[i];
+    }
+    __syncthreads();
+
+    // Loop through each atom in the cached block
+    for (int j = 0; j < min(blockDim.x, atoms_len - block_id * blockDim.x);
+         j++) {
+      double dist = sqrt((x - x_shared[j]) * (x - x_shared[j]) +
+                         (y - y_shared[j]) * (y - y_shared[j]) +
+                         (z - z_shared[j]) * (z - z_shared[j]));
+      int h_pos = (int)(dist / resolution);
+      if (h_pos < hist_len) {
+        atomicAdd(&hist[h_pos].d_cnt, 1);
+      }
+    }
+    __syncthreads();
+  }
+
+  // Load the current block into shared memory
+  x_shared[threadIdx.x] = x;
+  y_shared[threadIdx.x] = y;
+  z_shared[threadIdx.x] = z;
+  __syncthreads();
+
+  // Loop through each atom in the current block
+  for (int i = threadIdx.x + 1;
+       i < min(blockDim.x, atoms_len - blockIdx.x * blockDim.x); i++) {
+    double dist = sqrt((x - x_shared[i]) * (x - x_shared[i]) +
+                       (y - y_shared[i]) * (y - y_shared[i]) +
+                       (z - z_shared[i]) * (z - z_shared[i]));
+    int h_pos = (int)(dist / resolution);
+    if (h_pos < hist_len) {
+      atomicAdd(&hist[h_pos].d_cnt, 1);
+    }
+  }
+}
+
+__global__ void kernel_shared_mem_with_privatization(
+    double *x_pos, double *y_pos, double *z_pos, unsigned long long atoms_len,
+    bucket *hist_2d, unsigned int hist_len, double resolution) {
+  int idx = blockDim.x * blockIdx.x + threadIdx.x;
+  if (idx >= atoms_len)
+    return;
+  extern __shared__ double shared_data[]; // Single shared memory block
+  double *x_shared = shared_data;
+  double *y_shared = shared_data + blockDim.x;
+  double *z_shared = shared_data + 2 * blockDim.x;
   bucket *hist_shared = (bucket *)(shared_data + 3 * blockDim.x);
+
   // Initialize the shared histogram to 0
   for (int bin = threadIdx.x; bin < hist_len; bin += blockDim.x) {
     hist_shared[bin].d_cnt = 0;
@@ -256,6 +316,44 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
   }
   case SHARED_MEM: {
     printf("Running kernel using shared memory\n");
+    int grid_size = (atoms_gpu->len + block_size - 1) / block_size;
+    // We need to allocate enough space for the block size * 3 (x, y, z)
+    size_t shared_mem_size = 3 * block_size * sizeof(double);
+    if (shared_mem_size > deviceProp.sharedMemPerBlock) {
+      fprintf(stderr,
+              "Shared memory size is too large. Must be less than %zu\n",
+              deviceProp.sharedMemPerBlock);
+      return -1;
+    }
+    printf("Grid size: %d\n", grid_size);
+    printf("Block size: %d\n", block_size);
+    printf("Shared memory size: %zu\n", shared_mem_size);
+
+    cudaEvent_t start_time, end_time;
+    CHECK_CUDA_ERROR(cudaEventCreate(&start_time));
+    CHECK_CUDA_ERROR(cudaEventCreate(&end_time));
+
+    // Start the timer
+    CHECK_CUDA_ERROR(cudaEventRecord(start_time, 0));
+
+    kernel_shared_mem<<<grid_size, block_size, shared_mem_size>>>(
+        atoms_gpu->x_pos, atoms_gpu->y_pos, atoms_gpu->z_pos, atoms_gpu->len,
+        hist_gpu->arr, hist_gpu->len, hist_gpu->resolution);
+    CHECK_CUDA_ERROR(cudaPeekAtLastError());
+    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
+
+    // Stop the timer
+    CHECK_CUDA_ERROR(cudaEventRecord(end_time, 0));
+    CHECK_CUDA_ERROR(cudaEventSynchronize(end_time));
+
+    // Calculate the elapsed time
+    CHECK_CUDA_ERROR(cudaEventElapsedTime(diff, start_time, end_time));
+    CHECK_CUDA_ERROR(cudaEventDestroy(start_time));
+    CHECK_CUDA_ERROR(cudaEventDestroy(end_time));
+    break;
+  }
+  case SHARED_MEM_WITH_PRIVATIZATION: {
+    printf("Running kernel using shared memory with output privativation\n");
 
     // Launch the kernel
     printf("Launching shared memory kernel\n");
@@ -286,7 +384,8 @@ int PDH_cuda(atoms_data *atoms_gpu, histogram *hist_gpu, int block_size,
     // Start the timer
     CHECK_CUDA_ERROR(cudaEventRecord(start_time, 0));
 
-    kernel_shared_mem<<<grid_size, block_size, shared_mem_size>>>(
+    kernel_shared_mem_with_privatization<<<grid_size, block_size,
+                                           shared_mem_size>>>(
         atoms_gpu->x_pos, atoms_gpu->y_pos, atoms_gpu->z_pos, atoms_gpu->len,
         hist_2d, hist_gpu->len, hist_gpu->resolution);
     CHECK_CUDA_ERROR(cudaPeekAtLastError());
@@ -561,31 +660,44 @@ int main(int argc, char **argv) {
 
   // Generate heap-allocated data
   atoms_data atoms = atoms_data_init(particle_count, BOX_SIZE);
-  histogram hist_grid_2d = histogram_init(resolution, BOX_SIZE);
-  histogram hist_shared_mem = histogram_init(resolution, BOX_SIZE);
-  histogram hist_cpu = histogram_init(resolution, BOX_SIZE);
 
   // Run algorithms
-  float time_gpu_grid_2d, time_gpu_shared_mem, time_cpu;
+  float time_gpu_grid_2d, time_gpu_shared_mem, time_gpu_shared_mem_with_priv,
+      time_cpu;
+  histogram hist_grid_2d = histogram_init(resolution, BOX_SIZE);
   if (calculate_and_display_histogram(&atoms, &hist_grid_2d, GPU,
                                       &time_gpu_grid_2d, 2, block_size,
                                       GRID_2D) != 0) {
     printf("Error running GPU 2D grid (baseline) version. Exiting\n");
     free(hist_grid_2d.arr);
-    free(hist_shared_mem.arr);
-    free(hist_cpu.arr);
     free(atoms.x_pos);
     free(atoms.y_pos);
     free(atoms.z_pos);
     return 1;
   }
+  histogram hist_shared_mem = histogram_init(resolution, BOX_SIZE);
   if (calculate_and_display_histogram(&atoms, &hist_shared_mem, GPU,
                                       &time_gpu_shared_mem, 2, block_size,
                                       SHARED_MEM) != 0) {
     printf("Error running GPU shared memory version. Exiting\n");
     free(hist_grid_2d.arr);
     free(hist_shared_mem.arr);
-    free(hist_cpu.arr);
+    free(atoms.x_pos);
+    free(atoms.y_pos);
+    free(atoms.z_pos);
+    return 1;
+  }
+  histogram hist_shared_mem_with_privatization =
+      histogram_init(resolution, BOX_SIZE);
+  if (calculate_and_display_histogram(
+          &atoms, &hist_shared_mem_with_privatization, GPU,
+          &time_gpu_shared_mem_with_priv, 2, block_size,
+          SHARED_MEM_WITH_PRIVATIZATION) != 0) {
+    printf("Error running GPU shared memory with privatization version. "
+           "Exiting\n");
+    free(hist_grid_2d.arr);
+    free(hist_shared_mem.arr);
+    free(hist_shared_mem_with_privatization.arr);
     free(atoms.x_pos);
     free(atoms.y_pos);
     free(atoms.z_pos);
@@ -596,16 +708,22 @@ int main(int argc, char **argv) {
   display_histogram(&hist_grid_2d);
   printf("GPU shared memory version histogram:\n");
   display_histogram(&hist_shared_mem);
+  printf("GPU shared memory with privatization version histogram:\n");
+  display_histogram(&hist_shared_mem_with_privatization);
 
   // Display timing results
   printf("GPU time in miliseconds (2D grid): %f\n", time_gpu_grid_2d);
   printf("GPU time in miliseconds (shared memory): %f\n", time_gpu_shared_mem);
+  printf("GPU time in miliseconds (shared memory with privatization): %f\n",
+         time_gpu_shared_mem_with_priv);
 
+  histogram hist_cpu = histogram_init(resolution, BOX_SIZE);
   if (calculate_and_display_histogram(&atoms, &hist_cpu, CPU, &time_cpu, 0) !=
       0) {
     printf("Error running CPU version. Exiting\n");
     free(hist_grid_2d.arr);
     free(hist_shared_mem.arr);
+    free(hist_shared_mem_with_privatization.arr);
     free(hist_cpu.arr);
     free(atoms.x_pos);
     free(atoms.y_pos);
@@ -619,20 +737,26 @@ int main(int argc, char **argv) {
   for (int i = 0; i < hist_cpu.len; i++) {
     hist_grid_2d.arr[i].d_cnt -= hist_cpu.arr[i].d_cnt;
     hist_shared_mem.arr[i].d_cnt -= hist_cpu.arr[i].d_cnt;
+    hist_shared_mem_with_privatization.arr[i].d_cnt -= hist_cpu.arr[i].d_cnt;
   }
   // Display the diff
   printf("GPU 2D grid (baseline) version histogram diff:\n");
   display_histogram(&hist_grid_2d);
   printf("GPU shared memory version histogram diff:\n");
   display_histogram(&hist_shared_mem);
+  printf("GPU shared memory with privatization version histogram diff:\n");
+  display_histogram(&hist_shared_mem_with_privatization);
 
   // Display timing results
   printf("Speedup (GPU 2D grid vs CPU): %f\n", time_cpu / time_gpu_grid_2d);
   printf("Speedup (GPU shared memory vs CPU): %f\n",
          time_cpu / time_gpu_shared_mem);
+  printf("Speedup (GPU shared memory with privatization vs CPU): %f\n",
+         time_cpu / time_gpu_shared_mem_with_priv);
 
   free(hist_grid_2d.arr);
   free(hist_shared_mem.arr);
+  free(hist_shared_mem_with_privatization.arr);
   free(hist_cpu.arr);
   free(atoms.x_pos);
   free(atoms.y_pos);
