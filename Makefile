@@ -21,7 +21,7 @@ CU_OBJS = $(patsubst $(SRC_DIR)/%.cu, $(OBJ_DIR)/%.o, $(CU_SOURCES))
 OBJS = $(C_OBJS) $(CU_OBJS)
 
 # Executable
-TARGET = $(BIN_DIR)/a.out
+TARGET = $(BIN_DIR)/run
 
 # Build Rules
 all: $(TARGET)
