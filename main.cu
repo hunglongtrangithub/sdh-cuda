@@ -2,14 +2,11 @@
 #include "computation.h"
 #include "cuda_utils.h"
 #include "histogram.h"
-#include "kernels.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-
-#define BOX_SIZE 23000
 
 /* Results calculation and display function */
 int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
