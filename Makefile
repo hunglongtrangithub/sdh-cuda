@@ -2,7 +2,7 @@
 NVCC = nvcc
 CXX = g++
 CFLAGS = -O3 -Wall -Wextra -Werror -std=c++17
-NVFLAGS = -O3 -use_fast_math -lineinfo -Xcompiler "-Wall -Wextra -Werror"
+NVFLAGS = -O3 -lineinfo -Xcompiler "-Wall -Wextra -Werror"
 
 # Paths
 SRC_DIR = .

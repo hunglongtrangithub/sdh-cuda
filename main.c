@@ -10,7 +10,7 @@ int main(int argc, char **argv) {
   if (argc == 2) {
     if (strcmp(argv[1], "experiment") == 0) {
       experiment();
-      return 1;
+      return 0;
     } else {
       printf(help, argv[0], argv[0]);
       return 1;
