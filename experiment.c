@@ -1,11 +1,7 @@
-#include "atom.h"
 #include "computation.h"
-#include "histogram.h"
 #include <math.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 // Function to initialize the CSV file and write the header
 void init_csv_file(const char *filename) {
@@ -20,14 +16,14 @@ void init_csv_file(const char *filename) {
 
 // Function to append results to the CSV file
 void append_to_csv(const char *filename, size_t num_atoms, double resolution,
-                   unsigned int block_size, const char *algorithm,
+                   unsigned long int block_size, const char *algorithm,
                    float time_ms) {
   FILE *fp = fopen(filename, "a");
   if (!fp) {
     perror("Failed to open CSV file");
     return;
   }
-  fprintf(fp, "%zu,%.2f,%u,%s,%.3f\n", num_atoms, resolution, block_size,
+  fprintf(fp, "%zu,%.2f,%lu,%s,%.3f\n", num_atoms, resolution, block_size,
           algorithm, time_ms);
   fclose(fp);
 }
@@ -45,7 +41,7 @@ void run_experiments(const char *filename) {
     size_t num_atoms = num_atoms_list[i];
     double resolution = resolution_list[i % (sizeof(resolution_list) /
                                              sizeof(resolution_list[0]))];
-    unsigned int block_size =
+    unsigned long int block_size =
         block_sizes[i % (sizeof(block_sizes) / sizeof(block_sizes[0]))];
 
     // Initialize atoms
@@ -56,7 +52,7 @@ void run_experiments(const char *filename) {
     atoms_data_init(&atoms, BOX_SIZE);
 
     // Initialize the histogram
-    size_t num_buckets = (BOX_SIZE * sqrt(3) / resolution) + 1;
+    size_t num_buckets = (size_t)(BOX_SIZE * sqrt(3) / resolution) + 1;
     bucket buckets[num_buckets];
     histogram hist = {
         .arr = buckets, .len = num_buckets, .resolution = resolution};
@@ -86,12 +82,14 @@ void run_experiments(const char *filename) {
   }
 }
 
-int main() {
+int experiment() {
   // Create and initialize the CSV file
   const char *filename = "experiment_results.csv";
+  printf("Initializing CSV file %s...\n", filename);
   init_csv_file(filename);
 
   // Run the experiments with predefined configurations
+  printf("Running experiments...\n");
   run_experiments(filename);
 
   printf("Experiments completed. Results are saved in %s.\n", filename);

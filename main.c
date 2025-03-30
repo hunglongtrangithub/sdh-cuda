@@ -1,17 +1,14 @@
-#include "atom.h"
-#include "computation.h"
-#include "cuda_utils.h"
-#include "histogram.h"
+#include "experiment.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
+#include <string.h>
 
 /* Results calculation and display function */
 int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
-                                    platform platform, float *time, int count,
-                                    ...) {
+                                    enum platform platform, float *time,
+                                    int count, ...) {
   switch (platform) {
   case CPU: {
     printf("Running CPU version\n");
@@ -30,7 +27,7 @@ int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
     va_start(args, count);
     unsigned int block_size = va_arg(args, unsigned int);
     int algorithm_int = va_arg(args, int);
-    kernel_algorithm algorithm = static_cast<kernel_algorithm>(algorithm_int);
+    enum kernel_algorithm algorithm = (enum kernel_algorithm)algorithm_int;
     va_end(args);
 
     // Do the calculation and get the time
@@ -50,7 +47,7 @@ int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
 
 int run_gpu_version(atoms_data *atoms, histogram *cpu_hist, float time_cpu,
                     const char *version_name, enum kernel_algorithm gpu_ver,
-                    double resolution, unsigned int block_size) {
+                    double resolution, unsigned long int block_size) {
   // Initialize histogram for this GPU version
   size_t num_buckets = cpu_hist->len;
   bucket buckets[num_buckets]; // Stack allocation
@@ -86,16 +83,37 @@ int run_gpu_version(atoms_data *atoms, histogram *cpu_hist, float time_cpu,
   printf("========================================\n");
   return 0;
 }
-
 int main(int argc, char **argv) {
+  const char *help = "Usage:\n1. %s {#of_samples} {bucket_width} "
+                     "{block_size}\n2. %s experiment\n";
+  if (argc == 2) {
+    if (strcmp(argv[1], "experiment") == 0) {
+      experiment();
+      return 1;
+    } else {
+      printf(help, argv[0], argv[0]);
+      return 1;
+    }
+  }
+
   if (argc != 4) {
-    printf("Usage: %s {#of_samples} {bucket_width} {block_size}\n", argv[0]);
+    printf(help, argv[0], argv[0]);
     return 1;
   }
 
-  size_t particle_count = atoi(argv[1]);
+  if (atol(argv[1]) <= 0) {
+    printf("Invalid number of particles. Exiting\n");
+    return 1;
+  }
+  size_t particle_count = (size_t)atol(argv[1]);
+
   double resolution = atof(argv[2]);
-  unsigned int block_size = atoi(argv[3]);
+
+  if (atol(argv[3]) <= 0) {
+    printf("Invalid block size. Exiting\n");
+    return 1;
+  }
+  unsigned long int block_size = (unsigned long int)atol(argv[3]);
 
   // Initialize atoms on the stack
   double x_pos[particle_count];
@@ -105,7 +123,7 @@ int main(int argc, char **argv) {
   atoms_data_init(&atoms, BOX_SIZE);
 
   // The maximum distance between two points in a box is the diagonal
-  size_t num_buckets = (BOX_SIZE * sqrt(3) / resolution) + 1;
+  size_t num_buckets = (size_t)(BOX_SIZE * sqrt(3) / resolution) + 1;
 
   // Run CPU version first to get reference histogram
   bucket buckets_cpu[num_buckets]; // Stack allocation

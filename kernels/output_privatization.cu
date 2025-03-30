@@ -145,7 +145,7 @@ __global__ void kernel_reduction(bucket *hist_2d, int hist_2d_width,
 }
 
 int PDH_output_privatization(atoms_data *atoms_gpu, histogram *hist_gpu,
-                             unsigned int block_size, float *time) {
+                             unsigned long int block_size, float *time) {
   // Check if CUDA device is available
   int device_count;
   CHECK_CUDA_ERROR(cudaGetDeviceCount(&device_count));
@@ -172,7 +172,7 @@ int PDH_output_privatization(atoms_data *atoms_gpu, histogram *hist_gpu,
   }
 
   printf("Grid size: %d\n", grid_size);
-  printf("Block size: %d\n", block_size);
+  printf("Block size: %lu\n", block_size);
   printf("Shared memory size: %zu\n", shared_mem_size);
 
   // Define the histogram 2D grid for all blocks

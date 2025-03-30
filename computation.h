@@ -1,8 +1,6 @@
 #ifndef COMPUTATION
 #define COMPUTATION
 
-#include "atom.h"
-#include "histogram.h"
 #include "kernels.h"
 
 #define BOX_SIZE 23000
@@ -15,7 +13,7 @@ int PDH_baseline(atoms_data *atoms, histogram *hist);
 int time_and_fill_histogram_cpu(atoms_data *atoms, histogram *hist,
                                 float *time);
 int time_and_fill_histogram_gpu(atoms_data *atoms, histogram *hist,
-                                unsigned int block_size, float *time,
+                                unsigned long int block_size, float *time,
                                 enum kernel_algorithm algorithm);
 
 #endif // !COMPUTATION
