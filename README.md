@@ -49,9 +49,7 @@ The program prints:
 - Execution times for the CPU and GPU implementations.
 - Speedup comparisons between CPU and GPU.
 
-## TODO
-
-- [ ] **Plot Execution Time vs Block Size:** Generate a graph to visualize the execution time of all GPU implementations as a function of block size.
+Check out the `plots/` directory to see the execution time of all GPU implementations as a function of block size, number of atoms, and resolution.
 
 ## References
 
