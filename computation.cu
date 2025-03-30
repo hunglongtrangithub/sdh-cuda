@@ -119,7 +119,6 @@ int time_and_fill_histogram_gpu(atoms_data *atoms, histogram *hist,
   }
 
   if (success != 0) {
-    fprintf(stderr, "Error running the algorithm on the GPU\n");
     CHECK_CUDA_ERROR(cudaFree(atoms_gpu.y_pos));
     CHECK_CUDA_ERROR(cudaFree(atoms_gpu.x_pos));
     CHECK_CUDA_ERROR(cudaFree(atoms_gpu.z_pos));

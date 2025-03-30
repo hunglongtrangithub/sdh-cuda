@@ -84,8 +84,9 @@ int PDH_shared_memory(atoms_data *atoms_gpu, histogram *hist_gpu,
   // We need to allocate enough space for the block size * 3 (x, y, z)
   size_t shared_mem_size = 3 * block_size * sizeof(double);
   if (shared_mem_size > device_prop.sharedMemPerBlock) {
-    fprintf(stderr, "Shared memory size is too large. Must be less than %zu\n",
-            device_prop.sharedMemPerBlock);
+    fprintf(stderr,
+            "Shared memory size of %zu is too large. Must be less than %zu\n",
+            shared_mem_size, device_prop.sharedMemPerBlock);
     return -1;
   }
 

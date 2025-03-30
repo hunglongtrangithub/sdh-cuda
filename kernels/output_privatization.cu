@@ -166,8 +166,9 @@ int PDH_output_privatization(atoms_data *atoms_gpu, histogram *hist_gpu,
   size_t shared_mem_size =
       3 * block_size * sizeof(double) + hist_gpu->len * sizeof(bucket);
   if (shared_mem_size > deviceProp.sharedMemPerBlock) {
-    fprintf(stderr, "Shared memory size is too large. Must be less than %zu\n",
-            deviceProp.sharedMemPerBlock);
+    fprintf(stderr,
+            "Shared memory size of %zu is too large. Must be less than %zu\n",
+            shared_mem_size, deviceProp.sharedMemPerBlock);
     return -1;
   }
 
@@ -198,16 +199,17 @@ int PDH_output_privatization(atoms_data *atoms_gpu, histogram *hist_gpu,
   // Round up to the next power of 2 for the block size to do the reduction
   int reduction_block_size = pow(2, ceil(log2(grid_size + 1)));
   if (reduction_block_size > deviceProp.maxThreadsPerBlock) {
-    fprintf(stderr, "Block size is too large. Must be less than %d\n",
-            deviceProp.maxThreadsPerBlock);
+    fprintf(stderr, "Block size of %d is too large. Must be less than %d\n",
+            reduction_block_size, deviceProp.maxThreadsPerBlock);
     CHECK_CUDA_ERROR(cudaFree(hist_2d));
     return -1;
   }
 
   size_t reduction_shared_mem_size = reduction_block_size * sizeof(bucket);
   if (reduction_shared_mem_size > deviceProp.sharedMemPerBlock) {
-    fprintf(stderr, "Shared memory size is too large. Must be less than %zu\n",
-            deviceProp.sharedMemPerBlock);
+    fprintf(stderr,
+            "Shared memory size of %zu is too large. Must be less than %zu\n",
+            reduction_shared_mem_size, deviceProp.sharedMemPerBlock);
     CHECK_CUDA_ERROR(cudaFree(hist_2d));
     return -1;
   }
