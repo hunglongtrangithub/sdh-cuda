@@ -170,6 +170,7 @@ void run_experiments(const char *filename) {
       }
     }
   }
+  fclose(fp);
 }
 
 int experiment() {
