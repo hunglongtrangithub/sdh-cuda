@@ -13,7 +13,6 @@ int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
 
     // Do the calculation and get the time
     if (time_and_fill_histogram_cpu(atoms, hist, time) != 0) {
-      fprintf(stderr, "Error running the algorithm on the CPU\n");
       return -1;
     }
     return 0;
@@ -31,7 +30,6 @@ int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
     // Do the calculation and get the time
     if (time_and_fill_histogram_gpu(atoms, hist, block_size, time, algorithm) !=
         0) {
-      fprintf(stderr, "Error running the algorithm on the GPU\n");
       return -1;
     }
     return 0;

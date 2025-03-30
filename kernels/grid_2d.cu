@@ -53,8 +53,8 @@ int PDH_grid_2d(atoms_data *atoms_gpu, histogram *hist_gpu,
   CHECK_CUDA_ERROR(cudaGetDeviceProperties(&device_prop, 0));
 
   if ((int)block_size > device_prop.maxThreadsPerBlock) {
-    fprintf(stderr, "Block size is too large. Must be less than %d\n",
-            device_prop.maxThreadsPerBlock);
+    fprintf(stderr, "Block size of %lu is too large. Must be less than %d\n",
+            block_size, device_prop.maxThreadsPerBlock);
     return -1;
   }
   printf("Running baseline kernel using 2D grid\n");
