@@ -9,7 +9,7 @@ void histogram_init(histogram *hist) {
 }
 
 void display_histogram(histogram *hist) {
-  long long total_cnt = 0;
+  long long unsigned int total_cnt = 0;
 
   for (size_t i = 0; i < hist->len; i++) {
     if (i % 5 == 0)

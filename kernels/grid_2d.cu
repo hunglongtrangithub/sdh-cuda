@@ -40,7 +40,7 @@ __global__ void kernel_grid_2d(double *x_pos, double *y_pos, double *z_pos,
 }
 
 int PDH_grid_2d(atoms_data *atoms_gpu, histogram *hist_gpu,
-                unsigned int block_size, float *time) {
+                unsigned long int block_size, float *time) {
   // Check if CUDA device is available
   int device_count;
   CHECK_CUDA_ERROR(cudaGetDeviceCount(&device_count));

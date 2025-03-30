@@ -1,11 +1,7 @@
-#include "atom.h"
-#include "computation.h"
 #include "cuda_utils.h"
-#include "histogram.h"
 #include "kernels.h"
 #include <math.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <time.h>
 
 // Function to calculate pairwise distance histogram for CPU
@@ -69,7 +65,7 @@ int time_and_fill_histogram_cpu(atoms_data *atoms, histogram *hist,
 
 // Function to measure GPU time for PDH
 int time_and_fill_histogram_gpu(atoms_data *atoms, histogram *hist,
-                                unsigned int block_size, float *time,
+                                unsigned long int block_size, float *time,
                                 kernel_algorithm algorithm) {
   // Check if CUDA device is available
   int device_count;

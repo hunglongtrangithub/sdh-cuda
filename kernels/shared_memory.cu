@@ -1,7 +1,6 @@
 #include "../atom.h"
 #include "../cuda_utils.h"
 #include "../histogram.h"
-#include <math.h>
 #include <stdio.h>
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
@@ -67,7 +66,7 @@ __global__ void kernel_shared_memory(double *x_pos, double *y_pos,
 }
 
 int PDH_shared_memory(atoms_data *atoms_gpu, histogram *hist_gpu,
-                      unsigned int block_size, float *time) {
+                      unsigned long int block_size, float *time) {
   printf("Running kernel using shared memory\n");
 
   // Check if CUDA device is available
@@ -91,7 +90,7 @@ int PDH_shared_memory(atoms_data *atoms_gpu, histogram *hist_gpu,
   }
 
   printf("Grid size: %d\n", grid_size);
-  printf("Block size: %d\n", block_size);
+  printf("Block size: %lu\n", block_size);
   printf("Shared memory size: %zu\n", shared_mem_size);
 
   cudaEvent_t start_time, end_time;
