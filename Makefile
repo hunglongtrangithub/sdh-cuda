@@ -1,7 +1,7 @@
 # Compiler & Flags
 NVCC = nvcc
-CXX = g++
-CFLAGS = -O3 -Wall -Wextra -Werror -std=c++17
+CXX = gcc
+CFLAGS = -O3 -Wall -Wextra -Werror
 NVFLAGS = -O3 -lineinfo -Xcompiler "-Wall -Wextra -Werror"
 
 # Paths
