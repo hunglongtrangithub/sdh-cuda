@@ -4,38 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-int main(int argc, char **argv) {
-  const char *help = "Usage:\n1. %s {#of_samples} {bucket_width} "
-                     "{block_size}\n2. %s experiment\n";
-  if (argc == 2) {
-    if (strcmp(argv[1], "experiment") == 0) {
-      experiment();
-      return 0;
-    } else {
-      printf(help, argv[0], argv[0]);
-      return 1;
-    }
-  }
-
-  if (argc != 4) {
-    printf(help, argv[0], argv[0]);
-    return 1;
-  }
-
-  if (atol(argv[1]) <= 0) {
-    printf("Invalid number of particles. Exiting\n");
-    return 1;
-  }
-  size_t particle_count = (size_t)atol(argv[1]);
-
-  double resolution = atof(argv[2]);
-
-  if (atol(argv[3]) <= 0) {
-    printf("Invalid block size. Exiting\n");
-    return 1;
-  }
-  unsigned long int block_size = (unsigned long int)atol(argv[3]);
-
+int demo(size_t particle_count, double resolution,
+         unsigned long int block_size) {
   // Initialize atoms on the stack
   double x_pos[particle_count];
   double y_pos[particle_count];
@@ -83,4 +53,39 @@ int main(int argc, char **argv) {
   }
 
   return 0;
+}
+
+int main(int argc, char **argv) {
+  const char *help = "Usage:\n1. %s {#of_samples} {bucket_width} "
+                     "{block_size}\n2. %s experiment\n";
+  if (argc == 2) {
+    if (strcmp(argv[1], "experiment") == 0) {
+      experiment();
+      return 0;
+    } else {
+      printf(help, argv[0], argv[0]);
+      return 1;
+    }
+  }
+
+  if (argc != 4) {
+    printf(help, argv[0], argv[0]);
+    return 1;
+  }
+
+  if (atol(argv[1]) <= 0) {
+    printf("Invalid number of particles. Exiting\n");
+    return 1;
+  }
+  size_t particle_count = (size_t)atol(argv[1]);
+
+  double resolution = atof(argv[2]);
+
+  if (atol(argv[3]) <= 0) {
+    printf("Invalid block size. Exiting\n");
+    return 1;
+  }
+  unsigned long int block_size = (unsigned long int)atol(argv[3]);
+
+  return demo(particle_count, resolution, block_size);
 }
