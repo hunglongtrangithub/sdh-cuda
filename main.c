@@ -1,5 +1,6 @@
 #include "experiment.h"
 #include "utils.h"
+#include <errno.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -21,8 +22,7 @@ int demo(uint64_t particle_count, double resolution, uint64_t block_size) {
   // Run CPU version first to get reference histogram
   bucket *buckets_cpu = (bucket *)check_malloc(num_buckets * sizeof(bucket));
 
-  histogram hist_cpu = {
-      .arr = buckets_cpu, .len = num_buckets, .resolution = resolution};
+  histogram hist_cpu = {buckets_cpu, num_buckets, resolution};
   histogram_init(&hist_cpu);
 
   float time_cpu;
@@ -53,37 +53,62 @@ int demo(uint64_t particle_count, double resolution, uint64_t block_size) {
   return result;
 }
 
+static void usage(const char *prog) {
+  fprintf(stderr,
+          "Usage:\n"
+          "  %s <num_particles> <bucket_width> <block_size>\n"
+          "  %s experiment\n",
+          prog, prog);
+}
+
+/* ---------- helpers ---------------------------------------------------- */
+static int parse_u64(const char *s, uint64_t *out) {
+  errno = 0;
+  char *end;
+  unsigned long long v = strtoull(s, &end, 10);
+  if (errno == ERANGE || *end || v == 0)
+    return -1;
+  *out = (uint64_t)v;
+  return 0;
+}
+static int parse_double_pos(const char *s, double *out) {
+  errno = 0;
+  char *end;
+  double v = strtod(s, &end);
+  if (errno == ERANGE || *end || v <= 0.0)
+    return -1;
+  *out = v;
+  return 0;
+}
+
+/* ---------- main ------------------------------------------------------- */
 int main(int argc, char **argv) {
-  const char *help = "Usage:\n1. %s {#of_samples} {bucket_width} "
-                     "{block_size}\n2. %s experiment\n";
-  if (argc == 2) {
-    if (strcmp(argv[1], "experiment") == 0) {
-      experiment();
-      return 0;
-    } else {
-      printf(help, argv[0], argv[0]);
-      return 1;
-    }
+  if (argc == 2 && strcmp(argv[1], "experiment") == 0) {
+    return experiment();
   }
-
   if (argc != 4) {
-    printf(help, argv[0], argv[0]);
-    return 1;
+    usage(argv[0]);
+    return EXIT_FAILURE;
   }
 
-  if (atoll(argv[1]) <= 0) {
-    printf("Invalid number of particles. Exiting\n");
-    return 1;
+  uint64_t particles, block;
+  double bucket;
+
+  if (parse_u64(argv[1], &particles) != 0) {
+    fprintf(stderr, "Invalid particle count\n");
+    usage(argv[0]);
+    return EXIT_FAILURE;
   }
-  uint64_t particle_count = (uint64_t)atoll(argv[1]);
-
-  double resolution = atof(argv[2]);
-
-  if (atoll(argv[3]) <= 0) {
-    printf("Invalid block size. Exiting\n");
-    return 1;
+  if (parse_double_pos(argv[2], &bucket) != 0) {
+    fprintf(stderr, "Invalid bucket width\n");
+    usage(argv[0]);
+    return EXIT_FAILURE;
   }
-  uint64_t block_size = (uint64_t)atoll(argv[3]);
+  if (parse_u64(argv[3], &block) != 0) {
+    fprintf(stderr, "Invalid block size\n");
+    usage(argv[0]);
+    return EXIT_FAILURE;
+  }
 
-  return demo(particle_count, resolution, block_size);
+  return demo(particles, bucket, block);
 }
