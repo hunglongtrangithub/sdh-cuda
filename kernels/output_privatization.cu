@@ -197,7 +197,7 @@ int PDH_output_privatization(atoms_data *atoms_gpu, histogram *hist_gpu,
   printf("Launching reduction kernel\n");
 
   // Round up to the next power of 2 for the block size to do the reduction
-  int reduction_block_size = pow(2, ceil(log2(grid_size + 1)));
+  int reduction_block_size = pow(2, ceil(log2(grid_size)));
   if (reduction_block_size > deviceProp.maxThreadsPerBlock) {
     fprintf(stderr, "Block size of %d is too large. Must be less than %d\n",
             reduction_block_size, deviceProp.maxThreadsPerBlock);
