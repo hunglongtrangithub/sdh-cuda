@@ -1,7 +1,7 @@
 #ifndef HISTOGRAM
 #define HISTOGRAM
 
-#include <stddef.h>
+#include <stdint.h>
 
 typedef struct hist_entry {
   unsigned long long d_cnt;
@@ -9,7 +9,7 @@ typedef struct hist_entry {
 
 typedef struct histogram {
   bucket *arr;
-  size_t len;
+  uint64_t len;
   double resolution;
 } histogram;
 

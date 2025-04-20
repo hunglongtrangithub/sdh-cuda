@@ -1,26 +1,27 @@
 #include "histogram.h"
-#include <cstdlib>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 void histogram_init(histogram *hist) {
   // Set all counts to 0
-  for (size_t i = 0; i < hist->len; i++) {
+  for (uint64_t i = 0; i < hist->len; i++) {
     hist->arr[i].d_cnt = 0;
   }
 }
 
 void display_histogram(histogram *hist) {
-  long long unsigned int total_cnt = 0;
+  uint64_t total_cnt = 0;
 
-  for (size_t i = 0; i < hist->len; i++) {
+  for (uint64_t i = 0; i < hist->len; i++) {
     if (i % 5 == 0)
-      printf("\n%02zu: ", i);
+      printf("\n%02lu: ", i);
 
     printf("%15lld ", hist->arr[i].d_cnt);
     total_cnt += hist->arr[i].d_cnt;
 
     if (i == hist->len - 1)
-      printf("\n T:%lld \n", total_cnt);
+      printf("\n T:%lu \n", total_cnt);
     else
       printf("| ");
   }

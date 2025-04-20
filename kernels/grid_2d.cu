@@ -2,13 +2,14 @@
 #include "../histogram.h"
 #include "../utils.h"
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
 __global__ void kernel_grid_2d(double *x_pos, double *y_pos, double *z_pos,
-                               unsigned long long atoms_len, bucket *hist,
-                               unsigned int hist_len, double resolution) {
+                               uint64_t atoms_len, bucket *hist,
+                               uint64_t hist_len, double resolution) {
   int x = blockDim.x * blockIdx.x + threadIdx.x;
   int y = blockDim.y * blockIdx.y + threadIdx.y;
 

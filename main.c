@@ -1,12 +1,12 @@
 #include "experiment.h"
 #include "utils.h"
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-int demo(size_t particle_count, double resolution,
-         unsigned long int block_size) {
+int demo(uint64_t particle_count, double resolution, uint64_t block_size) {
   // Allocate memory for atoms
   double *x_pos = (double *)check_malloc(particle_count * sizeof(double));
   double *y_pos = (double *)check_malloc(particle_count * sizeof(double));
@@ -16,7 +16,7 @@ int demo(size_t particle_count, double resolution,
   atoms_data_init(&atoms, BOX_SIZE);
 
   // The maximum distance between two points in a box is the diagonal
-  size_t num_buckets = (size_t)(BOX_SIZE * sqrt(3) / resolution) + 1;
+  uint64_t num_buckets = (uint64_t)(BOX_SIZE * sqrt(3) / resolution) + 1;
 
   // Run CPU version first to get reference histogram
   bucket *buckets_cpu = (bucket *)check_malloc(num_buckets * sizeof(bucket));
@@ -71,19 +71,19 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  if (atol(argv[1]) <= 0) {
+  if (atoll(argv[1]) <= 0) {
     printf("Invalid number of particles. Exiting\n");
     return 1;
   }
-  size_t particle_count = (size_t)atol(argv[1]);
+  uint64_t particle_count = (uint64_t)atoll(argv[1]);
 
   double resolution = atof(argv[2]);
 
-  if (atol(argv[3]) <= 0) {
+  if (atoll(argv[3]) <= 0) {
     printf("Invalid block size. Exiting\n");
     return 1;
   }
-  unsigned long int block_size = (unsigned long int)atol(argv[3]);
+  uint64_t block_size = (uint64_t)atoll(argv[3]);
 
   return demo(particle_count, resolution, block_size);
 }
