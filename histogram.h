@@ -15,5 +15,6 @@ typedef struct histogram {
 
 void histogram_init(histogram *hist);
 void display_histogram(histogram *hist);
+void histogram_cleanup(histogram *hist);
 
 #endif // !HISTOGRAM

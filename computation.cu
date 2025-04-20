@@ -1,5 +1,5 @@
-#include "cuda_utils.h"
 #include "kernels.h"
+#include "utils.h"
 #include <math.h>
 #include <stdio.h>
 #include <time.h>

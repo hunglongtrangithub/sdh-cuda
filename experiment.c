@@ -4,43 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-int calculate_and_display_histogram(atoms_data *atoms, histogram *hist,
-                                    enum platform platform, float *time,
-                                    int count, ...) {
-  switch (platform) {
-  case CPU: {
-    printf("Running CPU version\n");
-
-    // Do the calculation and get the time
-    if (time_and_fill_histogram_cpu(atoms, hist, time) != 0) {
-      return -1;
-    }
-    return 0;
-  }
-  case GPU: {
-    printf("Running GPU version\n");
-
-    va_list args;
-    va_start(args, count);
-    unsigned int block_size = va_arg(args, unsigned int);
-    int algorithm_int = va_arg(args, int);
-    enum kernel_algorithm algorithm = (enum kernel_algorithm)algorithm_int;
-    va_end(args);
-
-    // Do the calculation and get the time
-    if (time_and_fill_histogram_gpu(atoms, hist, block_size, time, algorithm) !=
-        0) {
-      return -1;
-    }
-    return 0;
-  }
-  default: {
-    fprintf(stderr, "Unknown platform\n");
-    return -1;
-  }
-  }
-}
-
 int run_gpu_version(atoms_data *atoms, histogram *cpu_hist, float time_cpu,
                     const char *version_name, enum kernel_algorithm gpu_ver,
                     double resolution, unsigned long int block_size) {
@@ -55,8 +18,8 @@ int run_gpu_version(atoms_data *atoms, histogram *cpu_hist, float time_cpu,
   printf("========================================\n");
   printf("Running %s version\n", version_name);
   float time_gpu = 0;
-  if (calculate_and_display_histogram(atoms, &hist, GPU, &time_gpu, 2,
-                                      block_size, gpu_ver) != 0) {
+  if (time_and_fill_histogram_gpu(atoms, &hist, block_size, &time_gpu,
+                                  gpu_ver) != 0) {
     printf("Error running %s version. Exiting\n", version_name);
     return -1;
   }

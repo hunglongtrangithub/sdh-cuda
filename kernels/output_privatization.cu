@@ -1,6 +1,6 @@
-#include "../atom.h"
-#include "../cuda_utils.h"
+#include "../atoms.h"
 #include "../histogram.h"
+#include "../utils.h"
 #include <math.h>
 #include <stdio.h>
 

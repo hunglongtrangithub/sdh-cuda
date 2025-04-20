@@ -1,6 +1,6 @@
-#include "../atom.h"
-#include "../cuda_utils.h"
+#include "../atoms.h"
 #include "../histogram.h"
+#include "../utils.h"
 #include <stdio.h>
 
 #define min(a, b) ((a) < (b) ? (a) : (b))

@@ -1,3 +1,10 @@
+#ifndef UTILS
+#define UTILS
+
+#include <cstdio>
+#include <stddef.h>
+#include <stdlib.h>
+
 #define CHECK_CUDA_ERROR(call)                                                 \
   {                                                                            \
     cudaError_t err = call;                                                    \
@@ -7,3 +14,7 @@
       return -1;                                                               \
     }                                                                          \
   }
+
+void *check_malloc(size_t size);
+
+#endif // !UTILS
