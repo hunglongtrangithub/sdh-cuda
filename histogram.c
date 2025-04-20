@@ -1,4 +1,5 @@
 #include "histogram.h"
+#include <cstdlib>
 #include <stdio.h>
 
 void histogram_init(histogram *hist) {
@@ -23,4 +24,11 @@ void display_histogram(histogram *hist) {
     else
       printf("| ");
   }
+}
+
+void histogram_cleanup(histogram *hist) {
+  free(hist->arr);
+  hist->arr = NULL;
+  hist->len = 0;
+  hist->resolution = 0.0;
 }

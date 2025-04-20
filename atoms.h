@@ -17,5 +17,6 @@ typedef struct atom_list {
 } atoms_data;
 
 void atoms_data_init(atoms_data *atom, unsigned int box_size);
+void atoms_data_cleanup(atoms_data *atoms);
 
 #endif // !ATOM

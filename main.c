@@ -1,4 +1,5 @@
 #include "experiment.h"
+#include "utils.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,10 +7,11 @@
 
 int demo(size_t particle_count, double resolution,
          unsigned long int block_size) {
-  // Initialize atoms on the stack
-  double x_pos[particle_count];
-  double y_pos[particle_count];
-  double z_pos[particle_count];
+  // Allocate memory for atoms
+  double *x_pos = (double *)check_malloc(particle_count * sizeof(double));
+  double *y_pos = (double *)check_malloc(particle_count * sizeof(double));
+  double *z_pos = (double *)check_malloc(particle_count * sizeof(double));
+
   atoms_data atoms = {x_pos, y_pos, z_pos, particle_count};
   atoms_data_init(&atoms, BOX_SIZE);
 
@@ -17,42 +19,38 @@ int demo(size_t particle_count, double resolution,
   size_t num_buckets = (size_t)(BOX_SIZE * sqrt(3) / resolution) + 1;
 
   // Run CPU version first to get reference histogram
-  bucket buckets_cpu[num_buckets]; // Stack allocation
+  bucket *buckets_cpu = (bucket *)check_malloc(num_buckets * sizeof(bucket));
+
   histogram hist_cpu = {
-      .arr = buckets_cpu,
-      .len = num_buckets,
-      .resolution = resolution,
-  };
+      .arr = buckets_cpu, .len = num_buckets, .resolution = resolution};
   histogram_init(&hist_cpu);
 
-  float time_cpu = 0;
-  if (calculate_and_display_histogram(&atoms, &hist_cpu, CPU, &time_cpu, 0, 0,
-                                      0) != 0) {
-    printf("Error running CPU version. Exiting\n");
+  float time_cpu;
+  printf("Running CPU version...\n");
+  if (time_and_fill_histogram_cpu(&atoms, &hist_cpu, &time_cpu) != 0) {
+    fprintf(stderr, "CPU histogram computation failed\n");
+    atoms_data_cleanup(&atoms);
+    histogram_cleanup(&hist_cpu);
     return 1;
   }
-
-  // Store CPU time for speedup calculations
-
-  printf("CPU version histogram:\n");
-  display_histogram(&hist_cpu);
   printf("CPU time in milliseconds: %f\n", time_cpu);
 
   // Run GPU versions and compare to CPU
-  if (run_gpu_version(&atoms, &hist_cpu, time_cpu, "GPU 2D grid (baseline)",
-                      GRID_2D, resolution, block_size) != 0) {
-    return 1;
-  }
-  if (run_gpu_version(&atoms, &hist_cpu, time_cpu, "GPU shared memory",
-                      SHARED_MEMORY, resolution, block_size) != 0) {
-    return 1;
-  }
-  if (run_gpu_version(&atoms, &hist_cpu, time_cpu, "GPU output privatization",
-                      OUTPUT_PRIVATIZATION, resolution, block_size) != 0) {
-    return 1;
-  }
+  int result = 0;
+  result |=
+      run_gpu_version(&atoms, &hist_cpu, time_cpu, "GPU 2D grid (baseline)",
+                      GRID_2D, resolution, block_size);
+  result |= run_gpu_version(&atoms, &hist_cpu, time_cpu, "GPU shared memory",
+                            SHARED_MEMORY, resolution, block_size);
+  result |=
+      run_gpu_version(&atoms, &hist_cpu, time_cpu, "GPU output privatization",
+                      OUTPUT_PRIVATIZATION, resolution, block_size);
 
-  return 0;
+  // Cleanup
+  atoms_data_cleanup(&atoms);
+  histogram_cleanup(&hist_cpu);
+
+  return result;
 }
 
 int main(int argc, char **argv) {

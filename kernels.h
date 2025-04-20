@@ -1,7 +1,7 @@
 #ifndef KERNELS
 #define KERNELS
 
-#include "atom.h"
+#include "atoms.h"
 #include "histogram.h"
 
 enum kernel_algorithm { GRID_2D, OUTPUT_PRIVATIZATION, SHARED_MEMORY };
