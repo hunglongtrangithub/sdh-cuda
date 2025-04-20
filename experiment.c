@@ -1,14 +1,15 @@
 #include "computation.h"
 #include <math.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 int run_gpu_version(atoms_data *atoms, histogram *cpu_hist, float time_cpu,
                     const char *version_name, enum kernel_algorithm gpu_ver,
-                    double resolution, unsigned long int block_size) {
+                    double resolution, uint64_t block_size) {
   // Initialize histogram for this GPU version
-  size_t num_buckets = cpu_hist->len;
+  uint64_t num_buckets = cpu_hist->len;
   bucket buckets[num_buckets]; // Stack allocation
   histogram hist = {
       .arr = buckets, .len = num_buckets, .resolution = resolution};
@@ -31,7 +32,7 @@ int run_gpu_version(atoms_data *atoms, histogram *cpu_hist, float time_cpu,
 
   // Calculate and display diff
   histogram diff_hist = hist; // Copy the structure
-  for (size_t i = 0; i < diff_hist.len; i++) {
+  for (uint64_t i = 0; i < diff_hist.len; i++) {
     diff_hist.arr[i].d_cnt -= cpu_hist->arr[i].d_cnt;
   }
   printf("%s version histogram diff:\n", version_name);
@@ -45,9 +46,9 @@ int run_gpu_version(atoms_data *atoms, histogram *cpu_hist, float time_cpu,
 
 void run_experiments(const char *filename) {
   // List of configurations to try
-  size_t num_atoms_list[] = {10000, 50000, 100000};
+  uint64_t num_atoms_list[] = {10000, 50000, 100000};
   double resolution_list[] = {100, 200, 500};
-  size_t block_sizes[] = {32, 64, 128, 256};
+  uint64_t block_sizes[] = {32, 64, 128, 256};
 
   // Initialize the CSV file with an improved header
   printf("Creating CSV file %s\n", filename);
@@ -61,19 +62,19 @@ void run_experiments(const char *filename) {
 
   int run_id = 0;
   // Run a full cross-product of configurations
-  for (size_t i = 0; i < sizeof(num_atoms_list) / sizeof(num_atoms_list[0]);
+  for (uint64_t i = 0; i < sizeof(num_atoms_list) / sizeof(num_atoms_list[0]);
        i++) {
-    for (size_t j = 0; j < sizeof(resolution_list) / sizeof(resolution_list[0]);
-         j++) {
-      for (size_t k = 0; k < sizeof(block_sizes) / sizeof(block_sizes[0]);
+    for (uint64_t j = 0;
+         j < sizeof(resolution_list) / sizeof(resolution_list[0]); j++) {
+      for (uint64_t k = 0; k < sizeof(block_sizes) / sizeof(block_sizes[0]);
            k++) {
-        size_t num_atoms = num_atoms_list[i];
+        uint64_t num_atoms = num_atoms_list[i];
         double resolution = resolution_list[j];
-        size_t block_size = block_sizes[k];
+        uint64_t block_size = block_sizes[k];
         run_id++;
 
-        printf("Running configuration %d: atoms=%zu, resolution=%f, "
-               "block_size=%zu\n",
+        printf("Running configuration %d: atoms=%lu, resolution=%f, "
+               "block_size=%lu\n",
                run_id, num_atoms, resolution, block_size);
 
         // Initialize atoms
@@ -85,7 +86,7 @@ void run_experiments(const char *filename) {
         atoms_data_init(&atoms, BOX_SIZE);
 
         // Initialize the histogram
-        size_t num_buckets = (size_t)(BOX_SIZE * sqrt(3) / resolution) + 1;
+        uint64_t num_buckets = (uint64_t)(BOX_SIZE * sqrt(3) / resolution) + 1;
         bucket bucket[num_buckets];
 
         histogram hist = {
@@ -95,7 +96,7 @@ void run_experiments(const char *filename) {
         // Measure CPU time
         float time_cpu = 0;
         if (time_and_fill_histogram_cpu(&atoms, &hist, &time_cpu) == 0) {
-          fprintf(fp, "%d,%zu,%f,%zu,CPU,%.3f,1.0\n", run_id, num_atoms,
+          fprintf(fp, "%d,%lu,%f,%lu,CPU,%.3f,1.0\n", run_id, num_atoms,
                   resolution, block_size, time_cpu);
 
           printf("  CPU time: %.3f ms\n", time_cpu);
@@ -111,7 +112,7 @@ void run_experiments(const char *filename) {
         enum kernel_algorithm algorithms[] = {GRID_2D, SHARED_MEMORY,
                                               OUTPUT_PRIVATIZATION};
 
-        for (size_t alg = 0; alg < 3; alg++) {
+        for (uint64_t alg = 0; alg < 3; alg++) {
           // Reset histogram for each algorithm
           histogram_init(&hist);
 
@@ -120,7 +121,7 @@ void run_experiments(const char *filename) {
                                           algorithms[alg]) == 0) {
             float speedup = time_cpu / time_gpu;
 
-            fprintf(fp, "%d,%zu,%f,%zu,%s,%.3f,%.3f\n", run_id, num_atoms,
+            fprintf(fp, "%d,%lu,%f,%lu,%s,%.3f,%.3f\n", run_id, num_atoms,
                     resolution, block_size, gpu_algorithms[alg], time_gpu,
                     speedup);
 

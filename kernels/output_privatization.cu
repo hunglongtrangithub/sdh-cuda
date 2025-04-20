@@ -2,14 +2,15 @@
 #include "../histogram.h"
 #include "../utils.h"
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
-__global__ void
-kernel_output_privatization(double *x_pos, double *y_pos, double *z_pos,
-                            unsigned long long atoms_len, bucket *hist_2d,
-                            unsigned int hist_len, double resolution) {
+__global__ void kernel_output_privatization(double *x_pos, double *y_pos,
+                                            double *z_pos, uint64_t atoms_len,
+                                            bucket *hist_2d, uint64_t hist_len,
+                                            double resolution) {
   int idx = blockDim.x * blockIdx.x + threadIdx.x;
 
   // Shared memory layout: x/y/z plus block-private histogram
@@ -56,9 +57,8 @@ kernel_output_privatization(double *x_pos, double *y_pos, double *z_pos,
     __syncthreads();
 
     // Number of valid atoms in that block
-    int valid_count =
-        min((int)blockDim.x,
-            (int)(atoms_len - (unsigned long long)block_id * blockDim.x));
+    int valid_count = min((int)blockDim.x,
+                          (int)(atoms_len - (uint64_t)block_id * blockDim.x));
     if (valid_count < 0)
       valid_count = 0; // clamp
 
@@ -93,9 +93,8 @@ kernel_output_privatization(double *x_pos, double *y_pos, double *z_pos,
   __syncthreads();
 
   // Number of valid atoms in this block
-  int leftover =
-      min((int)blockDim.x,
-          (int)(atoms_len - (unsigned long long)blockIdx.x * blockDim.x));
+  int leftover = min((int)blockDim.x,
+                     (int)(atoms_len - (uint64_t)blockIdx.x * blockDim.x));
   if (leftover < 0)
     leftover = 0;
 

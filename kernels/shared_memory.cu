@@ -1,15 +1,16 @@
 #include "../atoms.h"
 #include "../histogram.h"
 #include "../utils.h"
+#include <stdint.h>
 #include <stdio.h>
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
 __global__ void kernel_shared_memory(double *x_pos, double *y_pos,
-                                     double *z_pos,
-                                     unsigned long long atoms_len, bucket *hist,
-                                     unsigned int hist_len, double resolution) {
-  int idx = blockDim.x * blockIdx.x + threadIdx.x;
+                                     double *z_pos, uint64_t atoms_len,
+                                     bucket *hist, uint64_t hist_len,
+                                     double resolution) {
+  uint64_t const idx = blockDim.x * blockIdx.x + threadIdx.x;
   if (idx >= atoms_len)
     return;
   extern __shared__ double shared_data[]; // Single shared memory block
@@ -33,12 +34,12 @@ __global__ void kernel_shared_memory(double *x_pos, double *y_pos,
     __syncthreads();
 
     // Loop through each atom in the cached block
-    for (int j = 0; j < min(blockDim.x, atoms_len - block_id * blockDim.x);
+    for (uint64_t j = 0; j < min(blockDim.x, atoms_len - block_id * blockDim.x);
          j++) {
       double dist = sqrt((x - x_shared[j]) * (x - x_shared[j]) +
                          (y - y_shared[j]) * (y - y_shared[j]) +
                          (z - z_shared[j]) * (z - z_shared[j]));
-      int h_pos = (int)(dist / resolution);
+      uint64_t h_pos = (uint64_t)(dist / resolution);
       if (h_pos < hist_len) {
         atomicAdd(&hist[h_pos].d_cnt, 1);
       }
@@ -53,12 +54,12 @@ __global__ void kernel_shared_memory(double *x_pos, double *y_pos,
   __syncthreads();
 
   // Loop through each atom in the current block
-  for (int i = threadIdx.x + 1;
+  for (uint64_t i = threadIdx.x + 1;
        i < min(blockDim.x, atoms_len - blockIdx.x * blockDim.x); i++) {
     double dist = sqrt((x - x_shared[i]) * (x - x_shared[i]) +
                        (y - y_shared[i]) * (y - y_shared[i]) +
                        (z - z_shared[i]) * (z - z_shared[i]));
-    int h_pos = (int)(dist / resolution);
+    uint64_t h_pos = (uint64_t)(dist / resolution);
     if (h_pos < hist_len) {
       atomicAdd(&hist[h_pos].d_cnt, 1);
     }
@@ -80,7 +81,7 @@ int PDH_shared_memory(atoms_data *atoms_gpu, histogram *hist_gpu,
   cudaDeviceProp device_prop;
   CHECK_CUDA_ERROR(cudaGetDeviceProperties(&device_prop, 0));
 
-  int grid_size = (atoms_gpu->len + block_size - 1) / block_size;
+  uint64_t grid_size = (atoms_gpu->len + block_size - 1) / block_size;
   // We need to allocate enough space for the block size * 3 (x, y, z)
   size_t shared_mem_size = 3 * block_size * sizeof(double);
   if (shared_mem_size > device_prop.sharedMemPerBlock) {
@@ -90,7 +91,7 @@ int PDH_shared_memory(atoms_data *atoms_gpu, histogram *hist_gpu,
     return -1;
   }
 
-  printf("Grid size: %d\n", grid_size);
+  printf("Grid size: %lu\n", grid_size);
   printf("Block size: %lu\n", block_size);
   printf("Shared memory size: %zu\n", shared_mem_size);
 
