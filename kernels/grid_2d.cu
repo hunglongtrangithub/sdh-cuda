@@ -40,8 +40,8 @@ __global__ void kernel_grid_2d(double *x_pos, double *y_pos, double *z_pos,
   atomicAdd(&hist[h_pos].d_cnt, 1);
 }
 
-int PDH_grid_2d(atoms_data *atoms_gpu, histogram *hist_gpu,
-                unsigned long int block_size, float *time) {
+int PDH_grid_2d(atoms_data *atoms_gpu, histogram *hist_gpu, uint64_t block_size,
+                float *time) {
   // Check if CUDA device is available
   int device_count;
   CHECK_CUDA_ERROR(cudaGetDeviceCount(&device_count));
@@ -53,17 +53,18 @@ int PDH_grid_2d(atoms_data *atoms_gpu, histogram *hist_gpu,
   cudaDeviceProp device_prop;
   CHECK_CUDA_ERROR(cudaGetDeviceProperties(&device_prop, 0));
 
-  if ((int)block_size > device_prop.maxThreadsPerBlock) {
+  if (block_size > (uint64_t)device_prop.maxThreadsPerBlock) {
     fprintf(stderr, "Block size of %lu is too large. Must be less than %d\n",
             block_size, device_prop.maxThreadsPerBlock);
     return -1;
   }
-  printf("Running baseline kernel using 2D grid\n");
 
+  printf("Running baseline kernel using 2D grid\n");
   // Define the number of blocks and threads per block
   dim3 block_dim(sqrt(block_size), sqrt(block_size));
   dim3 grid_dim((atoms_gpu->len + block_dim.x - 1) / block_dim.x,
                 (atoms_gpu->len + block_dim.y - 1) / block_dim.y);
+
   printf("Grid dimensions: %d x %d\n", grid_dim.x, grid_dim.y);
   printf("Block dimensions: %d x %d\n", block_dim.x, block_dim.y);
 

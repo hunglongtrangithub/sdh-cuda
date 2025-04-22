@@ -1,7 +1,6 @@
 #ifndef UTILS
 #define UTILS
 
-#include <cstdio>
 #include <stddef.h>
 #include <stdlib.h>
 

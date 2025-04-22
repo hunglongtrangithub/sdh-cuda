@@ -65,14 +65,23 @@ int time_and_fill_histogram_cpu(atoms_data *atoms, histogram *hist,
 
 // Function to measure GPU time for PDH
 int time_and_fill_histogram_gpu(atoms_data *atoms, histogram *hist,
-                                unsigned long int block_size, float *time,
+                                uint64_t block_size, float *time,
                                 kernel_algorithm algorithm) {
   // Check if CUDA device is available
   int device_count;
-  if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
-    fprintf(stderr, "No CUDA devices available\n");
+  CHECK_CUDA_ERROR(cudaGetDeviceCount(&device_count));
+  if (device_count == 0) {
+    fprintf(stderr, "No CUDA devices found\n");
     return -1;
   }
+
+  cudaDeviceProp deviceProp;
+  CHECK_CUDA_ERROR(cudaGetDeviceProperties(&deviceProp, 0));
+  printf("CUDA device: %s\n", deviceProp.name);
+  printf("Max threads per block: %d\n", deviceProp.maxThreadsPerBlock);
+  printf("Max shared memory per block: %zu\n", deviceProp.sharedMemPerBlock);
+  printf("Max grid size: %d x %d x %d\n", deviceProp.maxGridSize[0],
+         deviceProp.maxGridSize[1], deviceProp.maxGridSize[2]);
 
   // Initialize data on the GPU
   atoms_data atoms_gpu = {

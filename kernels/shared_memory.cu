@@ -1,6 +1,7 @@
 #include "../atoms.h"
 #include "../histogram.h"
 #include "../utils.h"
+#include <cstdint>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -67,9 +68,7 @@ __global__ void kernel_shared_memory(double *x_pos, double *y_pos,
 }
 
 int PDH_shared_memory(atoms_data *atoms_gpu, histogram *hist_gpu,
-                      unsigned long int block_size, float *time) {
-  printf("Running kernel using shared memory\n");
-
+                      uint64_t block_size, float *time) {
   // Check if CUDA device is available
   int device_count;
   CHECK_CUDA_ERROR(cudaGetDeviceCount(&device_count));
@@ -81,6 +80,13 @@ int PDH_shared_memory(atoms_data *atoms_gpu, histogram *hist_gpu,
   cudaDeviceProp device_prop;
   CHECK_CUDA_ERROR(cudaGetDeviceProperties(&device_prop, 0));
 
+  // maxThreadsPerBlock > 0 so we can safely cast to uint64_t
+  if (block_size > (uint64_t)device_prop.maxThreadsPerBlock) {
+    fprintf(stderr, "Block size of %lu is too large. Must be less than %d\n",
+            block_size, device_prop.maxThreadsPerBlock);
+    return -1;
+  }
+
   uint64_t grid_size = (atoms_gpu->len + block_size - 1) / block_size;
   // We need to allocate enough space for the block size * 3 (x, y, z)
   size_t shared_mem_size = 3 * block_size * sizeof(double);
@@ -91,6 +97,7 @@ int PDH_shared_memory(atoms_data *atoms_gpu, histogram *hist_gpu,
     return -1;
   }
 
+  printf("Running kernel using shared memory\n");
   printf("Grid size: %lu\n", grid_size);
   printf("Block size: %lu\n", block_size);
   printf("Shared memory size: %zu\n", shared_mem_size);
