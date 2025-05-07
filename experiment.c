@@ -1,4 +1,6 @@
 #include "computation.h"
+#include "histogram.h"
+#include "utils.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -10,7 +12,8 @@ int run_gpu_version(atoms_data *atoms, histogram *cpu_hist, float time_cpu,
                     double resolution, uint64_t block_size) {
   // Initialize histogram for this GPU version
   uint64_t num_buckets = cpu_hist->len;
-  bucket buckets[num_buckets]; // Stack allocation
+  bucket *buckets = (bucket *)check_malloc(num_buckets * sizeof(bucket));
+
   histogram hist = {
       .arr = buckets, .len = num_buckets, .resolution = resolution};
   histogram_init(&hist);
@@ -41,6 +44,8 @@ int run_gpu_version(atoms_data *atoms, histogram *cpu_hist, float time_cpu,
   // Display speedup
   printf("Speedup (%s vs CPU): %f\n", version_name, time_cpu / time_gpu);
   printf("========================================\n");
+
+  histogram_cleanup(&hist);
   return 0;
 }
 
@@ -73,8 +78,8 @@ void run_experiments(const char *filename) {
         uint64_t block_size = block_sizes[k];
         run_id++;
 
-        printf("Running configuration %d: atoms=%lu, resolution=%f, "
-               "block_size=%lu\n",
+        printf("Running configuration %d: atoms=%llu, resolution=%f, "
+               "block_size=%llu\n",
                run_id, num_atoms, resolution, block_size);
 
         // Initialize atoms
@@ -96,7 +101,7 @@ void run_experiments(const char *filename) {
         // Measure CPU time
         float time_cpu = 0;
         if (time_and_fill_histogram_cpu(&atoms, &hist, &time_cpu) == 0) {
-          fprintf(fp, "%d,%lu,%f,%lu,CPU,%.3f,1.0\n", run_id, num_atoms,
+          fprintf(fp, "%d,%llu,%f,%llu,CPU,%.3f,1.0\n", run_id, num_atoms,
                   resolution, block_size, time_cpu);
 
           printf("  CPU time: %.3f ms\n", time_cpu);
@@ -121,7 +126,7 @@ void run_experiments(const char *filename) {
                                           algorithms[alg]) == 0) {
             float speedup = time_cpu / time_gpu;
 
-            fprintf(fp, "%d,%lu,%f,%lu,%s,%.3f,%.3f\n", run_id, num_atoms,
+            fprintf(fp, "%d,%llu,%f,%llu,%s,%.3f,%.3f\n", run_id, num_atoms,
                     resolution, block_size, gpu_algorithms[alg], time_gpu,
                     speedup);
 
