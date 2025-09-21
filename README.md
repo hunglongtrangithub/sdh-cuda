@@ -25,6 +25,14 @@ This will generate the executable in the `bin/` directory as `run`.
 
 ## Running the Program
 
+### For Experiment
+
+```sh
+./bin/run experiment
+```
+
+### For Demo
+
 The executable requires three command-line arguments:
 
 ```sh
