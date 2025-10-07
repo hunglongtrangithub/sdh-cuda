@@ -48,19 +48,12 @@ __global__ void kernel_output_privatization(double *x_pos, double *y_pos,
       x_shared[threadIdx.x] = x_pos[i_global];
       y_shared[threadIdx.x] = y_pos[i_global];
       z_shared[threadIdx.x] = z_pos[i_global];
-    } else {
-      // IMPORTANT: Zero out leftover threads so we don't read stale memory
-      x_shared[threadIdx.x] = 0.0;
-      y_shared[threadIdx.x] = 0.0;
-      z_shared[threadIdx.x] = 0.0;
     }
     __syncthreads();
 
     // Number of valid atoms in that block
     int valid_count = min((int)blockDim.x,
                           (int)(atoms_len - (uint64_t)block_id * blockDim.x));
-    if (valid_count < 0)
-      valid_count = 0; // clamp
 
     // Compare our local atom with each valid atom in block block_id
     for (int j = 0; j < valid_count; j++) {
@@ -85,18 +78,12 @@ __global__ void kernel_output_privatization(double *x_pos, double *y_pos,
     x_shared[threadIdx.x] = x;
     y_shared[threadIdx.x] = y;
     z_shared[threadIdx.x] = z;
-  } else {
-    x_shared[threadIdx.x] = 0.0;
-    y_shared[threadIdx.x] = 0.0;
-    z_shared[threadIdx.x] = 0.0;
   }
   __syncthreads();
 
   // Number of valid atoms in this block
   int leftover = min((int)blockDim.x,
                      (int)(atoms_len - (uint64_t)blockIdx.x * blockDim.x));
-  if (leftover < 0)
-    leftover = 0;
 
   // Each thread compares its atom with atoms at higher thread indices
   for (int i = threadIdx.x + 1; i < leftover; i++) {
@@ -115,7 +102,11 @@ __global__ void kernel_output_privatization(double *x_pos, double *y_pos,
   //------------------------------------------------------
   // 4) Write the block's privatized histogram to global memory
   //------------------------------------------------------
-  // Row = bin in [0..hist_len), Column = blockIdx.x
+  // hist_2d is a 2D array stored in row-major order. Its dimensions are
+  // (hist_len, gridDim.x). Threads in the block cooperatively write the
+  // privatized histogram to the appropriate column (blockIdx.x), in strides of
+  // blockDim.x.
+  // Row index = bin in [0..hist_len), Column index = blockIdx.x
   for (int bin = threadIdx.x; bin < (int)hist_len; bin += blockDim.x) {
     hist_2d[bin * gridDim.x + blockIdx.x].d_cnt = hist_shared[bin].d_cnt;
   }
