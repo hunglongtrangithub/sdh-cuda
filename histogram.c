@@ -15,13 +15,13 @@ void display_histogram(histogram *hist) {
 
   for (uint64_t i = 0; i < hist->len; i++) {
     if (i % 5 == 0)
-      printf("\n%02llu: ", i);
+      printf("\n%02lu: ", i);
 
     printf("%15lld ", hist->arr[i].d_cnt);
     total_cnt += hist->arr[i].d_cnt;
 
     if (i == hist->len - 1)
-      printf("\n T:%llu \n", total_cnt);
+      printf("\n T:%lu \n", total_cnt);
     else
       printf("| ");
   }

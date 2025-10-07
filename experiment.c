@@ -78,8 +78,8 @@ void run_experiments(const char *filename) {
         uint64_t block_size = block_sizes[k];
         run_id++;
 
-        printf("Running configuration %d: atoms=%llu, resolution=%f, "
-               "block_size=%llu\n",
+        printf("Running configuration %d: atoms=%lu, resolution=%f, "
+               "block_size=%lu\n",
                run_id, num_atoms, resolution, block_size);
 
         // Initialize atoms
@@ -101,7 +101,7 @@ void run_experiments(const char *filename) {
         // Measure CPU time
         float time_cpu = 0;
         if (time_and_fill_histogram_cpu(&atoms, &hist, &time_cpu) == 0) {
-          fprintf(fp, "%d,%llu,%f,%llu,CPU,%.3f,1.0\n", run_id, num_atoms,
+          fprintf(fp, "%d,%lu,%f,%lu,CPU,%.3f,1.0\n", run_id, num_atoms,
                   resolution, block_size, time_cpu);
 
           printf("  CPU time: %.3f ms\n", time_cpu);
@@ -126,7 +126,7 @@ void run_experiments(const char *filename) {
                                           algorithms[alg]) == 0) {
             float speedup = time_cpu / time_gpu;
 
-            fprintf(fp, "%d,%llu,%f,%llu,%s,%.3f,%.3f\n", run_id, num_atoms,
+            fprintf(fp, "%d,%lu,%f,%lu,%s,%.3f,%.3f\n", run_id, num_atoms,
                     resolution, block_size, gpu_algorithms[alg], time_gpu,
                     speedup);
 

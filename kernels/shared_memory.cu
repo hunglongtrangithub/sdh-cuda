@@ -23,6 +23,7 @@ __global__ void kernel_shared_memory(double *x_pos, double *y_pos,
   double y = y_pos[idx];
   double z = z_pos[idx];
 
+  // 1. Inter-block comparisons
   // Loop through each next block from the current block
   for (int block_id = blockIdx.x + 1; block_id < gridDim.x; block_id++) {
     // Load the block into shared memory
@@ -48,6 +49,7 @@ __global__ void kernel_shared_memory(double *x_pos, double *y_pos,
     __syncthreads();
   }
 
+  // 2. Intra-block comparisons
   // Load the current block into shared memory
   x_shared[threadIdx.x] = x;
   y_shared[threadIdx.x] = y;
