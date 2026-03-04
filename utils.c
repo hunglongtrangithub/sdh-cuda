@@ -1,5 +1,6 @@
-#include <cstdio>
-#include <cstdlib>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 void *check_malloc(size_t size) {
   void *ptr = malloc(size);
