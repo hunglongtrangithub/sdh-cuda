@@ -1,3 +1,5 @@
+import sys
+
 from pathlib import Path
 import polars as pl
 import matplotlib.pyplot as plt
@@ -13,7 +15,7 @@ plot_dir.mkdir(exist_ok=True, parents=True)
 print(f"Saving plots to: {plot_dir.absolute()}")
 
 
-def load_data(filepath):
+def load_data(filepath: str):
     """Load and preprocess the experiment data using Polars"""
     if not Path(filepath).is_file():
         raise FileNotFoundError(f"File not found: {filepath}")
@@ -182,7 +184,8 @@ def plot_time_vs_atoms_by_resolution(df):
 
 def main():
     try:
-        df = load_data("experiment_results.csv")  # Fixed typo in filename
+        filepath: str = sys.argv[1] if len(sys.argv) > 1 else "experiment_results.csv"
+        df = load_data(filepath)
 
         # Generate all plots
         plot_time_vs_atoms(df)

@@ -1,5 +1,7 @@
 # Spatial Distance Histogram (SDH) on CUDA GPUs
 
+> **Note:** This is a Zig migration from the original C code, which has better numerical safety. For the original C implementation, check out the `c` branch.
+
 ## Overview
 
 This project implements and benchmarks algorithms for computing 2-body statistics on GPUs, as described in the paper [**"Algorithms and Framework for Computing 2-body Statistics on GPUs"**](https://cse.usf.edu/~tuy/pub/DAPD19.pdf). The primary goal is to compare the execution speed of various GPU implementations against a CPU version, analyzing performance under different CUDA block sizes.
@@ -15,39 +17,58 @@ The following algorithms are implemented:
 
 ## Compilation
 
-To compile the project, use the provided `Makefile`. Ensure you have **CUDA** installed before proceeding.
+To compile the project, use Zig (version 0.15.2):
 
 ```sh
-make -j$(nproc)
+zig build
 ```
 
-This will generate the executable in the `bin/` directory as `run`.
+This will generate the executable in the `zig-out/bin/` directory as `sdh`.
 
 ## Running the Program
 
 ### For Experiment
 
 ```sh
-./bin/run experiment
+./zig-out/bin/sdh_cuda experiment [csv_path]
 ```
+
+The optional `csv_path` defaults to `experiment_results.csv`.
+
+### Generate Plots
+
+After running the experiment, generate plots from the results. First, install dependencies:
+
+```sh
+uv sync
+```
+
+Then run the plotting script:
+
+```sh
+uv run plot.py [csv_path]
+```
+
+The optional `csv_path` defaults to `experiment_results.csv`. Plots are saved to the `plots/` directory.
 
 ### For Demo
 
-The executable requires three command-line arguments:
+The executable requires a subcommand and three command-line arguments:
 
 ```sh
-./bin/run {#of_samples} {bucket_width} {block_size}
+./zig-out/bin/sdh demo <num_particles> <bucket_width> <block_size> [--gpu-only]
 ```
 
 Example:
 
 ```sh
-./bin/run 10000 500 32
+./zig-out/bin/sdh demo 10000 500 32
 ```
 
-- `#of_samples` → Number of particles to compute SDH for.
+- `num_particles` → Number of particles to compute SDH for.
 - `bucket_width` → Bin width for the histogram.
 - `block_size` → CUDA block size used in the GPU kernel.
+- `--gpu-only` → (Optional) Run only GPU implementations, skipping CPU.
 
 ## Expected Output
 
