@@ -1,3 +1,2 @@
-a.out
-bin
-obj
+.zig-cache
+zig-out
