@@ -50,7 +50,7 @@ fn runGpuVersion(
         block_size,
         algorithm,
     ) catch |e| {
-        print("Error running {s} version. Exiting\n", .{version_name});
+        print("Error running {s} version: {}. Exiting\n", .{ version_name, e });
         return e;
     };
 
@@ -188,28 +188,23 @@ fn demo(
 
     if (gpu_only) {
         // GPU-only mode: run grid_2d as reference, compare others against it
-        const baseline = gpu_algorithms[0].name;
-        print("GPU-only mode: using {s} as baseline\n", .{baseline});
+        const baseline = gpu_algorithms[0];
+        print("GPU-only mode: using {s} as baseline\n", .{baseline.name});
 
         var ref_hist = try Histogram.init(allocator, resolution);
         defer ref_hist.deinit(allocator);
 
-        const ref_time_ms = runGpuVersion(
-            allocator,
+        const ref_time_ms = computation.timeAndFillHistogramGpu(
             &atoms,
             &ref_hist,
-            0,
-            "",
-            gpu_algorithms[0].name,
-            gpu_algorithms[0].algo,
-            resolution,
             block_size,
-        ) catch {
-            print("{s} failed, cannot establish GPU baseline\n", .{gpu_algorithms[0].name});
-            return;
+            baseline.algo,
+        ) catch |e| {
+            print("Error running {s} version ({}). cannot establish GPU baseline\n", .{ baseline.name, e });
+            return e;
         };
 
-        print("{s} time in milliseconds: {d:.3} (baseline)\n", .{ gpu_algorithms[0].name, ref_time_ms });
+        print("{s} time in milliseconds: {d:.3} (baseline)\n", .{ baseline.name, ref_time_ms });
 
         // Run remaining GPU algorithms compared against the baseline
         for (gpu_algorithms[1..]) |entry| {
@@ -218,7 +213,7 @@ fn demo(
                 &atoms,
                 &ref_hist,
                 ref_time_ms,
-                gpu_algorithms[0].name,
+                baseline.name,
                 entry.name,
                 entry.algo,
                 resolution,
