@@ -41,7 +41,7 @@ fn countDigits(n: usize) usize {
     return count;
 }
 
-pub fn display(self: *const Self, writer: *std.io.Writer) !void {
+pub fn display(self: *const Self, writer: *std.Io.Writer) !void {
     var total_cnt: u64 = 0;
     const width = countDigits(self.arr.len - 1);
 

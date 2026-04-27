@@ -5,7 +5,7 @@ const Histogram = @import("Histogram.zig");
 
 const print = std.debug.print;
 
-fn nsToMsF32(ns: u64) f32 {
+fn nsToMsF32(ns: i96) f32 {
     return @as(f32, @floatFromInt(ns)) / @as(f32, @floatFromInt(std.time.ns_per_ms));
 }
 
@@ -20,14 +20,15 @@ const gpu_algorithms = [_]GpuAlgorithmEntry{
     .{ .name = "GPU output privatization", .algo = .output_privatization },
 };
 
-fn displayHist(hist: *const Histogram) !void {
+fn displayHist(io: std.Io, hist: *const Histogram) !void {
     var buf: [4096]u8 = undefined;
-    var w = std.fs.File.stdout().writer(&buf);
+    var w = std.Io.File.stdout().writer(io, &buf);
     try hist.display(&w.interface);
     try w.interface.flush();
 }
 
 fn runGpuVersion(
+    io: std.Io,
     allocator: std.mem.Allocator,
     atoms: *const Atom,
     ref_hist: *const Histogram,
@@ -55,7 +56,7 @@ fn runGpuVersion(
     };
 
     print("{s} version histogram:\n", .{version_name});
-    try displayHist(&hist);
+    try displayHist(io, &hist);
     print("{s} time in milliseconds: {d:.3}\n", .{ version_name, time_gpu_ms });
 
     // Compute and display diff against reference
@@ -67,7 +68,7 @@ fn runGpuVersion(
     }
     var diff_hist = Histogram{ .arr = diff_buckets, .resolution = resolution };
     print("{s} version histogram diff:\n", .{version_name});
-    try displayHist(&diff_hist);
+    try displayHist(io, &diff_hist);
     for (diff_hist.arr) |bucket| {
         if (bucket.d_cnt != 0) {
             print("Result mismatch found\n", .{});
@@ -86,7 +87,7 @@ fn runGpuVersion(
     return time_gpu_ms;
 }
 
-fn runExperiments(allocator: std.mem.Allocator, csv: *std.io.Writer) !void {
+fn runExperiments(io: std.Io, allocator: std.mem.Allocator, csv: *std.Io.Writer) !void {
     const num_atoms_list = [_]usize{ 10000, 50000, 100000 };
     const resolution_list = [_]f64{ 100, 200, 500 };
     const block_sizes = [_]usize{ 32, 64, 128, 256 };
@@ -113,7 +114,7 @@ fn runExperiments(allocator: std.mem.Allocator, csv: *std.io.Writer) !void {
 
                 // CPU run
                 var time_cpu_ms: f32 = 0;
-                if (computation.timeAndFillHistogramCpu(&atoms, &hist)) |ns| {
+                if (computation.timeAndFillHistogramCpu(io, &atoms, &hist)) |ns| {
                     time_cpu_ms = nsToMsF32(ns);
                     try csv.print(
                         "{d},{d},{d:.1},{d},CPU,{d:.3},1.0\n",
@@ -158,25 +159,26 @@ fn runExperiments(allocator: std.mem.Allocator, csv: *std.io.Writer) !void {
     }
 }
 
-fn experiment(allocator: std.mem.Allocator, csv_path: []const u8) !void {
+fn experiment(io: std.Io, allocator: std.mem.Allocator, csv_path: []const u8) !void {
     print("Running experiments...\n", .{});
     print("Creating CSV file {s}\n", .{csv_path});
 
-    const file = std.fs.cwd().createFile(csv_path, .{}) catch |err| {
+    const file = std.Io.Dir.cwd().createFile(io, csv_path, .{}) catch |err| {
         print("Failed to create CSV file: {any}\n", .{err});
         return err;
     };
-    defer file.close();
+    defer file.close(io);
 
     var csv_buffer: [1024]u8 = undefined;
-    var csv_file_writer = file.writer(&csv_buffer);
+    var csv_file_writer = file.writer(io, &csv_buffer);
     const csv = &csv_file_writer.interface;
-    try runExperiments(allocator, csv);
+    try runExperiments(io, allocator, csv);
     try csv.flush();
     print("Experiments completed. Results are saved in {s}.\n", .{csv_path});
 }
 
 fn demo(
+    io: std.Io,
     allocator: std.mem.Allocator,
     particle_count: usize,
     resolution: f64,
@@ -209,6 +211,7 @@ fn demo(
         // Run remaining GPU algorithms compared against the baseline
         for (gpu_algorithms[1..]) |entry| {
             _ = try runGpuVersion(
+                io,
                 allocator,
                 &atoms,
                 &ref_hist,
@@ -226,8 +229,8 @@ fn demo(
         defer hist_cpu.deinit(allocator);
 
         print("Running CPU version...\n", .{});
-        const time_cpu_ns = computation.timeAndFillHistogramCpu(&atoms, &hist_cpu) catch {
-            print("CPU histogram computation failed\n", .{});
+        const time_cpu_ns = computation.timeAndFillHistogramCpu(io, &atoms, &hist_cpu) catch |e| {
+            print("CPU histogram computation failed due to clock error: {}\n", .{e});
             return;
         };
         const time_cpu_ms = nsToMsF32(time_cpu_ns);
@@ -235,6 +238,7 @@ fn demo(
 
         for (gpu_algorithms) |entry| {
             _ = try runGpuVersion(
+                io,
                 allocator,
                 &atoms,
                 &hist_cpu,
@@ -283,7 +287,7 @@ fn parseF64Pos(s: []const u8, name: []const u8) f64 {
 }
 
 fn nextArgOrUsage(
-    args: *std.process.ArgIterator,
+    args: *std.process.Args.Iterator,
     exe_cmd: []const u8,
     name: []const u8,
 ) []const u8 {
@@ -304,7 +308,7 @@ const Command = union(enum) {
     experiment: []const u8,
 };
 
-fn parseArgs(args: *std.process.ArgIterator) Command {
+fn parseArgs(args: *std.process.Args.Iterator) Command {
     const exe_cmd = std.fs.path.basename(args.next() orelse std.process.exit(0));
 
     const sub_cmd = args.next() orelse {
@@ -351,18 +355,18 @@ fn parseArgs(args: *std.process.ArgIterator) Command {
 
 // Entry point
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
-    var args = try std.process.argsWithAllocator(allocator);
+    var args = try init.minimal.args.iterateAllocator(allocator);
     defer args.deinit();
 
     const cmd = parseArgs(&args);
 
     switch (cmd) {
         .demo => |d| try demo(
+            io,
             allocator,
             d.num_particles,
             d.bucket_width,
@@ -370,6 +374,7 @@ pub fn main() !void {
             d.gpu_only,
         ),
         .experiment => |csv_path| try experiment(
+            io,
             allocator,
             csv_path,
         ),

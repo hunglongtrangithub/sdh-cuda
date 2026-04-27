@@ -6,14 +6,16 @@ const Atom = @import("Atom.zig");
 const Histogram = @import("Histogram.zig");
 const Bucket = Histogram.Bucket;
 
-const c = @cImport({
-    @cInclude("cuda_runtime.h");
-});
+const c = @import("c");
 
 // CPU
 
-pub fn timeAndFillHistogramCpu(atoms: *const Atom, hist: *Histogram) std.time.Timer.Error!u64 {
-    var timer = try std.time.Timer.start();
+pub fn timeAndFillHistogramCpu(io: std.Io, atoms: *const Atom, hist: *Histogram) std.Io.Clock.ResolutionError!i96 {
+    const clock = std.Io.Clock.awake;
+    const clk_res = try clock.resolution(io);
+    if (clk_res.nanoseconds == 0) return std.Io.Clock.ResolutionError.ClockUnavailable;
+
+    const start_time = std.Io.Timestamp.now(io, clock);
     const len = atoms.len;
     const res = hist.resolution;
     const num_buckets = hist.arr.len;
@@ -36,7 +38,8 @@ pub fn timeAndFillHistogramCpu(atoms: *const Atom, hist: *Histogram) std.time.Ti
             }
         }
     }
-    return timer.read();
+    const end_time = start_time.untilNow(io, clock);
+    return end_time.nanoseconds;
 }
 
 // GPU helpers

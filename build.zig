@@ -4,17 +4,28 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const translate_c = b.addTranslateC(.{
+        .root_source_file = b.path("src/c.h"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    translate_c.linkSystemLibrary("cudart", .{});
+
     const exe = b.addExecutable(.{
         .name = "sdh",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{
+                .{
+                    .name = "c",
+                    .module = translate_c.createModule(),
+                },
+            },
         }),
     });
-
-    exe.root_module.link_libc = true;
-    exe.root_module.linkSystemLibrary("cudart", .{});
 
     // Compile each .cu kernel file with nvcc and link the resulting object
     const cu_sources = [_][]const u8{
